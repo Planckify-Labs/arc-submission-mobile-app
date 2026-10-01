@@ -17,7 +17,14 @@ const { withAndroidManifest } = require("expo/config-plugins");
 
 const TOOLS_NS_URI = "http://schemas.android.com/tools";
 
+// Contacts: the pulsa/data picker uses the permission-free system picker
+// (modules/phone-contact-picker on Android), but the auto-applied
+// `expo-contacts` config plugin still injects both permissions. Play's
+// Contacts Permission policy (SDK 37+, 2027-01-27) requires a declaration
+// for READ_CONTACTS; nothing here reads the address book.
 const PERMISSIONS_TO_REMOVE = [
+  "android.permission.READ_CONTACTS",
+  "android.permission.WRITE_CONTACTS",
   "android.permission.READ_MEDIA_IMAGES",
   "android.permission.READ_MEDIA_VIDEO",
   "android.permission.READ_MEDIA_AUDIO",

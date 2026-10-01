@@ -1,6 +1,7 @@
 import * as Contacts from "expo-contacts";
 import { useCallback, useState } from "react";
-import { Alert } from "react-native";
+import { Alert, Platform } from "react-native";
+import { pickPhone } from "@/modules/phone-contact-picker";
 
 export interface PhoneContactEntry {
   id: string;
@@ -15,7 +16,6 @@ interface UseContactPickerOptions {
 
 export function useContactPicker({ onPhoneSelected }: UseContactPickerOptions) {
   const [visible, setVisible] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [contacts, setContacts] = useState<PhoneContactEntry[]>([]);
 
   const closePicker = useCallback(() => setVisible(false), []);
@@ -32,67 +32,66 @@ export function useContactPicker({ onPhoneSelected }: UseContactPickerOptions) {
     [onPhoneSelected],
   );
 
+  // Neither platform requests contacts permission or reads the address book:
+  // both use the OS picker, which returns only what the user taps (Play
+  // Contacts Permission policy; iOS 18 limited access). Do NOT reintroduce
+  // requestPermissionsAsync / getContactsAsync here.
   const pickContact = useCallback(async () => {
     try {
-      const { status } = await Contacts.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert(
-          "Permission needed",
-          "Allow contacts access to pick a phone number.",
-        );
+      if (Platform.OS === "android") {
+        const picked = await pickPhone();
+        if (picked) onPhoneSelected(picked.number, picked.name);
         return;
       }
 
-      // Open the sheet immediately with a loading state so it feels responsive
-      // while we read what can be a large contact book.
-      setContacts([]);
-      setIsLoading(true);
-      setVisible(true);
+      // iOS: the picker returns one whole contact. One number selects
+      // straight away; several open the sheet to choose among that
+      // contact's numbers only.
+      const contact = await Contacts.presentContactPickerAsync();
+      if (!contact) return;
 
-      const { data } = await Contacts.getContactsAsync({
-        fields: [Contacts.Fields.PhoneNumbers],
-      });
-
-      // Flatten to one entry per phone number (a contact can have several) and
-      // de-duplicate by normalized digits so the list stays clean.
       const entries: PhoneContactEntry[] = [];
       const seen = new Set<string>();
-      for (const contact of data) {
-        if (!contact.phoneNumbers?.length) continue;
-        for (const phone of contact.phoneNumbers) {
-          const number = phone.number?.trim();
-          if (!number) continue;
-          const dedupeKey = number.replace(/\D/g, "");
-          if (!dedupeKey || seen.has(dedupeKey)) continue;
-          seen.add(dedupeKey);
-          entries.push({
-            id: `${contact.id ?? dedupeKey}-${phone.id ?? dedupeKey}`,
-            name: contact.name?.trim() || number,
-            number,
-            label: phone.label,
-          });
-        }
+      for (const phone of contact.phoneNumbers ?? []) {
+        const number = phone.number?.trim();
+        const dedupeKey = number?.replace(/\D/g, "");
+        if (!number || !dedupeKey || seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+        entries.push({
+          id: `${contact.id ?? dedupeKey}-${phone.id ?? dedupeKey}`,
+          name: contact.name?.trim() || number,
+          number,
+          label: phone.label,
+        });
       }
 
-      setContacts(entries);
+      if (entries.length === 0) {
+        Alert.alert(
+          "No phone number",
+          "That contact doesn't have a phone number. Please pick another.",
+        );
+      } else if (entries.length === 1) {
+        handleSelect(entries[0]);
+      } else {
+        setContacts(entries);
+        setVisible(true);
+      }
     } catch (error) {
-      if (__DEV__) console.warn("Failed to load contacts:", error);
-      setVisible(false);
+      if (__DEV__) console.warn("Failed to pick contact:", error);
       Alert.alert(
         "Couldn't open contacts",
-        "We couldn't load your contacts. Please try again.",
+        "We couldn't open your contacts. Please try again.",
       );
-    } finally {
-      setIsLoading(false);
     }
-  }, []);
+  }, [onPhoneSelected, handleSelect]);
 
   return {
     pickContact,
     closePicker,
     handleSelect,
     visible,
-    isLoading,
+    // The OS picker is instant; kept so the sheet API stays unchanged.
+    isLoading: false,
     contacts,
   };
 }
