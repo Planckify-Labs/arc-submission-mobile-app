@@ -85,6 +85,10 @@ export default defineConfig({
       "services/nanopay/settlementAmount.test.ts",
       "services/nanopay/preflight.test.ts",
       "services/errors/paymentErrors.test.ts",
+      // Onramp / Add funds (docs/onramp-app-kit-spec.md §7, §8).
+      "services/onramp/onramp.test.ts",
+      "services/addFunds/routeForm.test.ts",
+      "services/addFunds/transferTracker.test.ts",
       // Sui Intent Engine (Sui Overflow 2026 Phase 1)
       "services/chains/sui/intent/intentSchema.test.ts",
       "services/chains/sui/intent/intentStore.test.ts",

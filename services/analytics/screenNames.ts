@@ -11,6 +11,7 @@ const SCREEN_NAMES: Record<string, string> = {
   send: "Send",
   "send-success": "Send Success",
   deposit: "Deposit",
+  "add-funds": "Add Funds",
   withdraw: "Withdraw",
   payment: "Bill Payment",
   "pay-merchant": "Merchant Payment",

@@ -1,0 +1,14 @@
+{
+  "name": "takumipay-onramp-embed",
+  "private": true,
+  "description": "Hosted onramp widget page for onramp.takumipay.xyz (mobile-app docs/onramp-app-kit-spec.md §4.5.1 A2). Deploy from its own pipeline, not the marketing site.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@circle-fin/onramp-kit": "1.0.3"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10"
+  }
+}

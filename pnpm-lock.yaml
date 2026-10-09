@@ -32,6 +32,9 @@ importers:
       '@circle-fin/app-kit':
         specifier: 1.15.3
         version: 1.15.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)
+      '@circle-fin/onramp-kit':
+        specifier: 1.0.3
+        version: 1.0.3
       '@expo/vector-icons':
         specifier: ^15.0.3
         version: 15.0.3(expo-font@14.0.11(expo@54.0.33)(react-native@0.81.5(@babel/core@7.28.4(supports-color@8.1.1))(@types/react@19.1.16)(bufferutil@4.1.0)(react@19.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.1.0))(react-native@0.81.5(@babel/core@7.28.4(supports-color@8.1.1))(@types/react@19.1.16)(bufferutil@4.1.0)(react@19.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.1.0)
@@ -1061,6 +1064,10 @@ packages:
 
   '@circle-fin/onramp-kit@1.0.2':
     resolution: {integrity: sha512-Y3gB/E6LFD/a/5nSZbT5H8pfKeHKat7+6NsomGlNsSh9LALkJalBmwSXtro52HctMxMjuxcQQ2J0YGn9R6qHJA==}
+    engines: {node: '>=20.0.0'}
+
+  '@circle-fin/onramp-kit@1.0.3':
+    resolution: {integrity: sha512-/pwmh1+O50ElERMjS73/6b4n7AI0qqR7V5pxg6AzIGjlNA2oB9WYttZKLysbTnw7g7im66b8jEgGkqSs9WmC8g==}
     engines: {node: '>=20.0.0'}
 
   '@circle-fin/provider-cctp-v2@1.14.0':
@@ -8357,6 +8364,11 @@ snapshots:
       - utf-8-validate
 
   '@circle-fin/onramp-kit@1.0.2':
+    dependencies:
+      pino: 10.1.0
+      zod: 3.25.67
+
+  '@circle-fin/onramp-kit@1.0.3':
     dependencies:
       pino: 10.1.0
       zod: 3.25.67

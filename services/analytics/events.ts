@@ -143,6 +143,19 @@ export type AnalyticsEventProps = {
   };
   deeplink_rejected: { code: string };
   deeplink_approved: { class: string; transport: string };
+  // Add funds / Buy (docs/onramp-app-kit-spec.md §9). No amounts,
+  // addresses or tokens: `code` is the widget's coarse code, `type` our
+  // own OnrampErrorCode, `host` bundled | hosted.
+  add_funds_tab_opened: { tab: string };
+  onramp_opened: Record<string, never>;
+  onramp_session_minted: { host: string };
+  onramp_widget_ready: Record<string, never>;
+  onramp_submitted: Record<string, never>;
+  onramp_settled: Record<string, never>;
+  onramp_not_completed: { code: string };
+  onramp_error: { type: string };
+  // A swap or bridge submitted from the Add funds tabs. No amounts or tokens.
+  add_funds_route_submitted: { kind: string };
 };
 
 export type AnalyticsEvent = keyof AnalyticsEventProps;

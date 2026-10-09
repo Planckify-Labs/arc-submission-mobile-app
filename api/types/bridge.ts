@@ -307,6 +307,36 @@ export interface TBridgeSupportedChain {
   nativeSymbol?: string;
 }
 
+/** One validated bridge pair: the same asset on both sides. */
+export interface TBridgeRoutePair {
+  from: TBridgeToken;
+  to: TBridgeToken;
+  /** Adapters that route it, App Kit's first. */
+  providers: string[];
+}
+
+/** `GET /bridge/route-tokens`: only what a provider actually routes. */
+export interface TBridgeRouteTokens {
+  from: TCaip2;
+  to: TCaip2;
+  /** Bridge: exact pairs. Empty for a swap. */
+  pairs: TBridgeRoutePair[];
+  /** Swap: tradable tokens. Empty for a bridge. */
+  tokens: TBridgeToken[];
+  /** A provider could not be checked; its tokens are left out. */
+  degraded: boolean;
+}
+
+/** `GET /bridge/reach`: what a wallet on one chain can reach. */
+export interface TBridgeReach {
+  chain: TCaip2;
+  /** A provider swaps on this chain. */
+  swap: boolean;
+  /** Our enabled chains a provider bridges to from this one. */
+  destinations: TBridgeSupportedChain[];
+  degraded: boolean;
+}
+
 export interface TBridgeSupport {
   chains: TBridgeSupportedChain[];
   providers: Array<{ key: string; tools: string[] }>;
@@ -327,6 +357,11 @@ export interface TBridgeQuoteRequest {
   amountRaw: string;
   fromAddress: string;
   toAddress: string;
+  /**
+   * The minimum the user approved. Sent only by the execute-time re-quote,
+   * so the backend can hold the route to it (slippage only ever tightened).
+   */
+  minReceiveRaw?: string;
   transferSpeedHint?: "fast" | "standard";
   useForwarder?: boolean;
 }

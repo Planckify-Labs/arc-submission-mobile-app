@@ -158,6 +158,13 @@ export const bridgeStatusStore = {
     toChain: string;
     provider?: string;
     initialStatus?: TBridgeStatus;
+    /**
+     * When the transfer actually began. Passed when tracking resumes after
+     * an app restart (the Add funds transfer tracker persists it), so the
+     * backoff and stall clocks keep counting from the real start instead
+     * of restarting on every launch.
+     */
+    startedAt?: number;
   }): () => void {
     const { sourceTxHash, fromChain, toChain } = params;
     if (!sourceTxHash || !fromChain || !toChain) {
@@ -178,7 +185,7 @@ export const bridgeStatusStore = {
         provider,
         status: params.initialStatus,
         lastUpdated: now,
-        startedAt: now,
+        startedAt: params.startedAt ?? now,
       });
       notify();
     }

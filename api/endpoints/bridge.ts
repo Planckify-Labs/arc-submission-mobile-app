@@ -4,10 +4,13 @@ import type {
   TBridgeQuote,
   TBridgeQuoteRequest,
   TBridgeQuoteResult,
+  TBridgeReach,
+  TBridgeRouteTokens,
   TBridgeStatus,
   TBridgeStatusRequest,
   TBridgeSupport,
   TBridgeToken,
+  TCaip2,
 } from "../types/bridge";
 
 /**
@@ -63,6 +66,32 @@ export const bridgeApi = {
    * providers' own token lists (swap spec §4.6: a token pair needs no row
    * of ours). `verification` is our verdict, not the provider's.
    */
+  /**
+   * From one chain: can a provider swap there, and which of our chains can
+   * it bridge to. The bridge picker offers ONLY these destinations, so a
+   * user never picks a pair nothing can move.
+   */
+  getReach: async (from: TCaip2) => {
+    const search = new URLSearchParams({ from }).toString();
+    return api.get(`bridge/reach?${search}`).json<TBridgeReach>();
+  },
+
+  /**
+   * Validated tokens for one route: same-asset pairs for a bridge,
+   * tradable tokens for a swap (`from` = `to`). Only what a provider
+   * actually routes, so a picker never offers a dead end.
+   */
+  getRouteTokens: async (from: TCaip2, to: TCaip2) => {
+    const search = new URLSearchParams({ from, to }).toString();
+    return api.get(`bridge/route-tokens?${search}`).json<TBridgeRouteTokens>();
+  },
+
+  /** The route providers' token list for a chain (vouched first). */
+  listTokens: async (chain: TCaip2) => {
+    const search = new URLSearchParams({ chain }).toString();
+    return api.get(`bridge/tokens?${search}`).json<TBridgeToken[]>();
+  },
+
   searchTokens: async (chain: string, query: string) => {
     const search = new URLSearchParams({ chain, query }).toString();
     return api.get(`bridge/tokens/search?${search}`).json<TBridgeToken[]>();

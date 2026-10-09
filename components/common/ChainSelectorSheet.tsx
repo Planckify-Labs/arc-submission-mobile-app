@@ -38,13 +38,38 @@ import type { Namespace } from "@/services/chains/types";
 import { walletKitRegistry } from "@/services/walletKit/registry";
 import { ownedNamespaces } from "@/services/walletPresence";
 
+export type TPickedChain = {
+  caip2: string;
+  label: string;
+  config: ChainConfig;
+};
+
 export type ChainSelectorSheetProps = {
   visible: boolean;
   onClose: () => void;
+  /**
+   * Pick mode. Hand the chosen chain back instead of switching the app's
+   * network: a bridge destination is somewhere funds GO, not the chain the
+   * user is now looking at. Same list, same grouping, same testnet toggle.
+   */
+  onSelectChain?: (chain: TPickedChain) => void;
+  /**
+   * Pick mode: offer ONLY these CAIP-2 chains (e.g. the destinations a
+   * provider actually serves). Chains outside it are not listed at all,
+   * because they are not an option, rather than dimmed.
+   */
+  allowedCaip2?: ReadonlySet<string> | null;
+  /** Pick mode: the current pick, shown with the check mark. */
+  selectedCaip2?: string | null;
+  title?: string;
+  /** Pick mode: copy for an empty allowed set. */
+  emptyText?: string;
 };
 
 type ChainRowItem = {
   key: string;
+  /** Enricher-computed CAIP-2 of the backing row, when it has one. */
+  caip2: string | undefined;
   namespace: Namespace;
   label: string;
   symbol: string;
@@ -125,7 +150,16 @@ function ChainListSkeleton() {
   );
 }
 
-function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
+function ChainSelectorSheetBase({
+  visible,
+  onClose,
+  onSelectChain,
+  allowedCaip2,
+  selectedCaip2,
+  title,
+  emptyText,
+}: ChainSelectorSheetProps) {
+  const pickMode = Boolean(onSelectChain);
   const { activeChain, changeActiveChain, changeActiveChainToConfig, wallets } =
     useWallet();
   const [searchQuery, setSearchQuery] = useState("");
@@ -189,6 +223,7 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
           case "eip155":
             row = {
               key: `eip155:${blockchain.chainId ?? "unknown"}`,
+              caip2: blockchain.caip2Id ?? undefined,
               namespace: "eip155",
               label: blockchain.name,
               symbol: token?.symbol ?? "",
@@ -201,6 +236,7 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
           case "solana":
             row = {
               key: `solana:${config.cluster}`,
+              caip2: blockchain.caip2Id ?? undefined,
               namespace: "solana",
               label: blockchain.name,
               symbol: token?.symbol ?? "",
@@ -213,6 +249,7 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
           case "sui":
             row = {
               key: `sui:${config.network}`,
+              caip2: blockchain.caip2Id ?? undefined,
               namespace: "sui",
               label: blockchain.name,
               symbol: token?.symbol ?? "SUI",
@@ -225,6 +262,7 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
           case "stellar":
             row = {
               key: `stellar:${config.network}`,
+              caip2: blockchain.caip2Id ?? undefined,
               namespace: "stellar",
               label: blockchain.name,
               symbol: token?.symbol ?? "XLM",
@@ -241,6 +279,9 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
             );
           }
         }
+        if (allowedCaip2 && (!row.caip2 || !allowedCaip2.has(row.caip2))) {
+          continue;
+        }
         const bucket = groups.get(row.namespace);
         if (bucket) bucket.push(row);
         else groups.set(row.namespace, [row]);
@@ -253,10 +294,21 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
       final.set(ns, sortWithinGroup(rows));
     }
     return final;
-  }, [blockchains, nativeTokens]);
+  }, [blockchains, nativeTokens, allowedCaip2]);
 
   const handleChainSelect = useCallback(
     async (row: ChainRowItem) => {
+      if (onSelectChain) {
+        if (row.caip2) {
+          onSelectChain({
+            caip2: row.caip2,
+            label: row.label,
+            config: row.config,
+          });
+        }
+        onClose();
+        return;
+      }
       setSwitchingRowKey(row.key);
 
       await new Promise<void>((resolve) =>
@@ -274,7 +326,7 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
         onClose();
       }
     },
-    [changeActiveChain, changeActiveChainToConfig, onClose],
+    [changeActiveChain, changeActiveChainToConfig, onClose, onSelectChain],
   );
 
   const handleAddWallet = useCallback(
@@ -290,6 +342,7 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
 
   const isRowActive = useCallback(
     (row: ChainRowItem): boolean => {
+      if (pickMode) return !!row.caip2 && row.caip2 === selectedCaip2;
       if (row.namespace === "eip155" && activeChain.namespace === "eip155") {
         return activeChain.chain.id === row.evmChainId;
       }
@@ -304,7 +357,7 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
       }
       return false;
     },
-    [activeChain],
+    [activeChain, pickMode, selectedCaip2],
   );
 
   /**
@@ -347,9 +400,11 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
     }
     // Only worth surfacing while searching: someone typing "sepolia" wants
     // it found, not a silent "no match" because of a toggle they forgot.
+    // Also worth surfacing when the toggle is the only reason the list is
+    // empty (a pick list that offers testnets only, say).
     return {
       filteredGrouped: out,
-      hiddenTestnetMatches: q.length > 0 ? hidden : 0,
+      hiddenTestnetMatches: q.length > 0 || out.size === 0 ? hidden : 0,
     };
   }, [grouped, searchQuery, showTestnets, isRowActive]);
 
@@ -458,7 +513,7 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
         height="67%"
         contentClassName="px-6"
       >
-        <ModalHeader title="Select Network" />
+        <ModalHeader title={title ?? "Select Network"} />
 
         <View className="flex-row items-center bg-light rounded-2xl px-3 py-2 mb-3">
           <Search size={16} color="#20222c80" />
@@ -502,7 +557,9 @@ function ChainSelectorSheetBase({ visible, onClose }: ChainSelectorSheetProps) {
               <Text className="text-light-matte-black/60 text-sm text-center">
                 {searchQuery.trim().length > 0
                   ? `No networks match "${searchQuery}"`
-                  : "No networks available"}
+                  : hiddenTestnetMatches > 0
+                    ? "Only testnets are available here."
+                    : (emptyText ?? "No networks available")}
               </Text>
             </View>
           ) : (

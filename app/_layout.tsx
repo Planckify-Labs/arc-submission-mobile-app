@@ -24,6 +24,7 @@ import { PerformanceProvider } from "@/components/providers/PerformanceProvider"
 import LockScreen from "@/components/security/LockScreen";
 import { PinGateHost } from "@/components/security/PinGateHost";
 import QKEY_Wallets from "@/constants/queryKeys/walletQueryKeys";
+import { useTransferTrackerResume } from "@/hooks/addFunds/useTransferTrackerResume";
 import { useAgentBackgroundKeepAlive } from "@/hooks/useAgentBackgroundKeepAlive";
 import { useAppSessionTracking } from "@/hooks/useAppSessionTracking";
 // Ordering (spec §6.2): polyfill import → bootWalletKits() → any screen/provider.
@@ -237,6 +238,9 @@ function AppShell() {
   useTransferRecordOutboxFlush();
   useAppSessionTracking(locked);
   useAgentBackgroundKeepAlive();
+  // Swaps and bridges from Add funds keep their status after a restart.
+  // Waits for unlock: polling reads wallet-scoped endpoints.
+  useTransferTrackerResume(!locked);
 
   // Keep the non-React mirrors of app state current. The root bridge
   // context reads the wallet list from a holder (never the active

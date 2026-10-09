@@ -300,6 +300,14 @@ describe("swap_execute through bridge_execute", () => {
     expect(again.ok).toBe(true);
   });
 
+  it("asks the backend to hold the floor the user read", async () => {
+    await run();
+    const req = getQuote.mock.calls[0][0] as { minReceiveRaw?: string };
+    // The approved minimum rides on the signing-time re-quote, so a tick
+    // in the market is absorbed by tighter slippage instead of a refusal.
+    expect(req.minReceiveRaw).toMatch(/^\d+$/);
+  });
+
   it("never lets the model name a swap recipient", async () => {
     await run({ to_address: "0x000000000000000000000000000000000000dEaD" });
     const req = getQuote.mock.calls[0][0] as { toAddress: string };

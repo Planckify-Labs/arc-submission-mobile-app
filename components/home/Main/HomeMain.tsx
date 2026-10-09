@@ -5,6 +5,8 @@ import {
   ScrollView,
   View,
 } from "react-native";
+import { ActiveTransfersBanner } from "@/components/add-funds/transfers/TransfersEntry";
+import { TransfersSheetHost } from "@/components/add-funds/transfers/TransfersSheet";
 import BalanceSection, {
   BalanceSectionRef,
 } from "@/components/home/Main/BalanceSection";
@@ -79,6 +81,9 @@ export default function HomeMain({ onOpenAgentChat }: HomeMainProps) {
     >
       <View className="flex-1 gap-4 py-4 pb-24">
         <Header />
+        <View className="-mb-4 px-4">
+          <ActiveTransfersBanner />
+        </View>
         <BalanceSection ref={balanceSectionRef} />
         <View onLayout={handleAgentSectionLayout}>
           <TakumiAgentSection
@@ -89,6 +94,7 @@ export default function HomeMain({ onOpenAgentChat }: HomeMainProps) {
         </View>
         <RecommendationSection ref={recommendationSectionRef} />
       </View>
+      <TransfersSheetHost />
     </ScrollView>
   );
 }

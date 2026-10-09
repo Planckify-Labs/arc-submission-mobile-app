@@ -568,6 +568,12 @@ export const bridgeExecute: MobileToolExecutor = (input, context) =>
         amountRaw,
         fromAddress: context.wallet.address,
         toAddress,
+        // The floor the user read. Without it, a fresh quote at the same
+        // slippage clears the floor only if the price did not tick down at
+        // all, so ordinary movement refused swaps that were still well
+        // above it. The backend tightens slippage to hold it (never widens);
+        // the check below still enforces it either way.
+        ...(minReceiveRaw ? { minReceiveRaw } : {}),
       });
     } catch (err) {
       if (__DEV__) {

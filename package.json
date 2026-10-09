@@ -36,6 +36,7 @@
     "@cetusprotocol/aggregator-sdk": "^1.6.0",
     "@circle-fin/adapter-viem-v2": "1.18.0",
     "@circle-fin/app-kit": "1.15.3",
+    "@circle-fin/onramp-kit": "1.0.3",
     "@expo/vector-icons": "^15.0.3",
     "@jup-ag/lend": "^0.2.0",
     "@metamask/smart-accounts-kit": "^1.6.0",

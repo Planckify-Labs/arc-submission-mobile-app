@@ -321,14 +321,14 @@ const BalanceSection = forwardRef<BalanceSectionRef>((props, ref) => {
             <View className="flex-1 min-w-[100px] gap-3 flex-row flex-wrap">
               <TouchableOpacity
                 activeOpacity={0.7}
-                onPress={() => router.push("/deposit")}
+                onPress={() => router.push("/add-funds")}
                 className="flex-1 min-w-[120px] bg-light-main-container rounded-xl py-3 px-3 flex-row items-center"
               >
                 <View className="mr-2">
                   <DepositIcon width={32} height={32} />
                 </View>
                 <Text className="text-light-matte-black text-[10px] font-medium">
-                  Add points
+                  Add funds
                 </Text>
               </TouchableOpacity>
 
