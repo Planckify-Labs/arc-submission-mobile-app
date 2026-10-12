@@ -16,6 +16,7 @@ import { toByteArray as base64Decode } from "base64-js";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import type { TWallet } from "@/constants/types/walletTypes";
 import {
+  deriveAllowedPaymentTokenPda,
   deriveConfigPda,
   deriveMerchantPaymentPda,
   derivePlatformFeePda,
@@ -238,6 +239,12 @@ export async function executeOnchainSettlementSvm(
     tokenMintPubkey,
   );
 
+  const [allowedTokenPda] = deriveAllowedPaymentTokenPda(
+    programId,
+    configPda,
+    tokenMintPubkey,
+  );
+
   const paramData = encodeMerchantQuoteParams(quote, refIdHash);
 
   const instructions: TransactionInstruction[] = [ed25519Ix];
@@ -255,6 +262,7 @@ export async function executeOnchainSettlementSvm(
       { pubkey: configPda, isSigner: false, isWritable: true },
       { pubkey: merchantPaymentPda, isSigner: false, isWritable: true },
       { pubkey: platformFeePda, isSigner: false, isWritable: true },
+      { pubkey: allowedTokenPda, isSigner: false, isWritable: false },
       {
         pubkey: SYSVAR_INSTRUCTIONS_PUBKEY,
         isSigner: false,
@@ -285,6 +293,7 @@ export async function executeOnchainSettlementSvm(
       { pubkey: merchantPaymentPda, isSigner: false, isWritable: true },
       { pubkey: platformFeePda, isSigner: false, isWritable: true },
       { pubkey: tokenMintPubkey, isSigner: false, isWritable: false },
+      { pubkey: allowedTokenPda, isSigner: false, isWritable: false },
       { pubkey: payerTokenAccount, isSigner: false, isWritable: true },
       { pubkey: vaultTokenAccount, isSigner: false, isWritable: true },
       {

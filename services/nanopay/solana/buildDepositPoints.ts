@@ -11,6 +11,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import {
+  deriveAllowedPaymentTokenPda,
   deriveConfigPda,
   derivePointDepositPda,
   derivePointRefRecordPda,
@@ -85,14 +86,10 @@ export function buildDepositPointsInstruction(params: {
     true,
   );
 
-  // Find the allowed_pt PDA
-  const [allowedTokenPda] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("allowed_pt"),
-      configPda.toBuffer(),
-      params.tokenMint.toBuffer(),
-    ],
+  const [allowedTokenPda] = deriveAllowedPaymentTokenPda(
     params.programId,
+    configPda,
+    params.tokenMint,
   );
 
   const argData = encodeDepositPointsArgs(

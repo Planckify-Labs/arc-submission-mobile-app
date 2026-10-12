@@ -12,6 +12,7 @@ import {
   TransactionInstruction,
 } from "@solana/web3.js";
 import {
+  deriveAllowedPaymentTokenPda,
   deriveConfigPda,
   deriveRefRecordPda,
   deriveSpendingLimitPda,
@@ -110,6 +111,12 @@ export function buildCreateTransactionInstruction(params: {
   );
 
   const paramData = encodeCreateTransactionParams(params.params);
+  // Native SOL is allowlisted under the default pubkey sentinel.
+  const [allowedTokenPda] = deriveAllowedPaymentTokenPda(
+    params.programId,
+    configPda,
+    params.tokenMint ?? SystemProgram.programId,
+  );
 
   if (!params.tokenMint || isNativeSol(params.tokenMint)) {
     // createTransactionSol
@@ -120,6 +127,7 @@ export function buildCreateTransactionInstruction(params: {
       { pubkey: configPda, isSigner: false, isWritable: true },
       { pubkey: txRecordPda, isSigner: false, isWritable: true },
       { pubkey: refRecordPda, isSigner: false, isWritable: true },
+      { pubkey: allowedTokenPda, isSigner: false, isWritable: false },
       // spending_limit is optional — pass null for now
       { pubkey: params.programId, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -150,6 +158,7 @@ export function buildCreateTransactionInstruction(params: {
     { pubkey: txRecordPda, isSigner: false, isWritable: true },
     { pubkey: refRecordPda, isSigner: false, isWritable: true },
     { pubkey: tokenMint, isSigner: false, isWritable: false },
+    { pubkey: allowedTokenPda, isSigner: false, isWritable: false },
     { pubkey: payerTokenAccount, isSigner: false, isWritable: true },
     { pubkey: vaultTokenAccount, isSigner: false, isWritable: true },
     // spending_limit optional

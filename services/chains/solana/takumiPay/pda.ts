@@ -1,7 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 export const TAKUMI_PAY_PROGRAM_ID = new PublicKey(
-  "6CCTEtYrk8unNhjYQ7npiLUf1iKQQJU88JSYn8EJLNYy",
+  "Baj91uzqwt8hRaJmke3dV8RdBwjq5MaWEtKNuUFTBBwS",
 );
 
 function bigintToLeBytes(value: bigint, byteLength: number): Uint8Array {
@@ -58,6 +58,26 @@ export function derivePlatformFeePda(
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("platform_fee"), config.toBytes(), tokenMint.toBytes()],
+    programId,
+  );
+}
+
+/**
+ * Payment allowlist marker. Every value-in entrypoint requires it, so an
+ * unlisted mint fails account resolution. Native SOL is keyed by the default
+ * pubkey (`SystemProgram.programId`), matching the program's sentinel.
+ */
+export function deriveAllowedPaymentTokenPda(
+  programId: PublicKey,
+  config: PublicKey,
+  tokenMint: PublicKey,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("allowed_payment_token"),
+      config.toBytes(),
+      tokenMint.toBytes(),
+    ],
     programId,
   );
 }
