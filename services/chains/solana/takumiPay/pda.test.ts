@@ -10,12 +10,11 @@ import {
   deriveSpendingLimitPda,
   deriveTxRecordPda,
   deriveWithdrawalPda,
-  TAKUMI_PAY_PROGRAM_ID,
 } from "./pda";
 import { computeRefIdHash } from "./refIdHash";
 
 // Use the actual program ID for deterministic PDA derivation
-const programId = TAKUMI_PAY_PROGRAM_ID;
+const programId = new PublicKey("Baj91uzqwt8hRaJmke3dV8RdBwjq5MaWEtKNuUFTBBwS");
 
 // Helper to derive config PDA (needed as seed for other PDAs)
 const [configPda] = deriveConfigPda(programId);

@@ -4,7 +4,6 @@ import {
   deriveAllowedPaymentTokenPda,
   deriveConfigPda,
   TAKUMI_PAY_IDL,
-  TAKUMI_PAY_PROGRAM_ID,
 } from "@/services/chains/solana/takumiPay";
 import { executeOnchainSettlementSvm } from "../../pathOnchainSettlementSvm";
 import { buildCreateTransactionInstruction } from "../buildCreateTransaction";
@@ -13,7 +12,7 @@ import { buildDepositPointsInstruction } from "../buildDepositPoints";
 // The program resolves accounts by position, so each builder's key list must
 // line up with the IDL. These tests pin the allowlist account, which every
 // value-in entrypoint requires.
-const programId = TAKUMI_PAY_PROGRAM_ID;
+const programId = new PublicKey("Baj91uzqwt8hRaJmke3dV8RdBwjq5MaWEtKNuUFTBBwS");
 const [config] = deriveConfigPda(programId);
 const payer = Keypair.generate().publicKey;
 const usdc = PublicKey.unique();

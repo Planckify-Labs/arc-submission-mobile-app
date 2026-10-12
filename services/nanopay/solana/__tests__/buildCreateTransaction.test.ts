@@ -3,12 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   deriveConfigPda,
   isNativeSol,
-  TAKUMI_PAY_PROGRAM_ID,
 } from "@/services/chains/solana/takumiPay";
 import { computeRefIdHash } from "@/services/chains/solana/takumiPay/refIdHash";
 import { buildCreateTransactionInstruction } from "../buildCreateTransaction";
 
-const programId = TAKUMI_PAY_PROGRAM_ID;
+const programId = new PublicKey("Baj91uzqwt8hRaJmke3dV8RdBwjq5MaWEtKNuUFTBBwS");
 // `payer` must be on-curve because `getAssociatedTokenAddressSync` (used
 // in the Token variant path) checks it. The user's wallet is always an
 // Ed25519 keypair; `PublicKey.unique()` returns off-curve keys.

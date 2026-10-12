@@ -1,9 +1,5 @@
 import { PublicKey } from "@solana/web3.js";
 
-export const TAKUMI_PAY_PROGRAM_ID = new PublicKey(
-  "Baj91uzqwt8hRaJmke3dV8RdBwjq5MaWEtKNuUFTBBwS",
-);
-
 function bigintToLeBytes(value: bigint, byteLength: number): Uint8Array {
   const buf = new Uint8Array(byteLength);
   let v = value;

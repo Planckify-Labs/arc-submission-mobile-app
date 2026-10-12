@@ -1,10 +1,8 @@
 import { PublicKey } from "@solana/web3.js";
+import { smartContractApi } from "@/api/endpoints/smart-contracts";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import { storage } from "@/lib/storage/mmkv";
-import {
-  deriveConfigPda,
-  TAKUMI_PAY_PROGRAM_ID,
-} from "@/services/chains/solana/takumiPay";
+import { deriveConfigPda } from "@/services/chains/solana/takumiPay";
 import { computeRefIdHash } from "@/services/chains/solana/takumiPay/refIdHash";
 import { buildCreateTransactionInstruction } from "@/services/nanopay/solana/buildCreateTransaction";
 import { buildDepositPointsInstruction } from "@/services/nanopay/solana/buildDepositPoints";
@@ -48,6 +46,30 @@ function getSolanaKit() {
     );
   }
   return walletKitRegistry.get(SOLANA_NAMESPACE);
+}
+
+/**
+ * The takumi_pay program ID for the active cluster, from the API's
+ * SmartContract registry — the same source the merchant-payment screen and
+ * the EVM paths use, so a redeploy needs no app release.
+ */
+async function resolveTakumiPayProgramId(
+  chain: Extract<ChainConfig, { namespace: "solana" }>,
+): Promise<PublicKey> {
+  const slug = `solana-${chain.cluster}`;
+  const contracts = await smartContractApi.searchSmartContracts({
+    name: "takumi_pay",
+    type: "payment",
+    isActive: true,
+  });
+  const match = contracts.find((c) => c.blockchain?.chainSlug === slug);
+  if (!match) {
+    throw new ExecutorError(
+      ExecutorErrorCode.NotImplemented,
+      `takumi_pay_not_deployed_on_${slug}`,
+    );
+  }
+  return new PublicKey(match.address);
 }
 
 async function fetchTakumiPayConfig(rpcUrl: string, programId: PublicKey) {
@@ -129,7 +151,7 @@ export const executeBookingSol: MobileToolExecutor = (input, context) =>
     const refIdHash = computeRefIdHash(refId);
     const tokenMint = tokenMintStr ? new PublicKey(tokenMintStr) : null;
     const payer = new PublicKey(context.wallet.address);
-    const programId = TAKUMI_PAY_PROGRAM_ID;
+    const programId = await resolveTakumiPayProgramId(chain);
 
     const config = await fetchTakumiPayConfig(chain.rpcUrl, programId);
 
@@ -212,7 +234,7 @@ export const depositPointsSol: MobileToolExecutor = (input, context) =>
 
     const tokenMint = new PublicKey(tokenMintStr);
     const payer = new PublicKey(context.wallet.address);
-    const programId = TAKUMI_PAY_PROGRAM_ID;
+    const programId = await resolveTakumiPayProgramId(chain);
 
     // For deposit_points, amount is in token minor units
     // The LLM provides human-readable amount; we need to parse decimals

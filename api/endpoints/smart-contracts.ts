@@ -5,6 +5,8 @@ export interface TBlockchain {
   id: string;
   name: string;
   chainId: number | null;
+  /** Stable slug for non-EVM rows, e.g. `solana-devnet`. */
+  chainSlug?: string | null;
   rpcUrl: string;
   blockExplorer: string;
   isEVM: boolean;
