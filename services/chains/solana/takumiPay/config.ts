@@ -23,12 +23,16 @@ export async function readTakumiPayCounters(
   const [configPda] = deriveConfigPda(programId);
   const account = await connection.getAccountInfo(configPda);
   if (!account) return null;
-  const data = account.data.subarray(8);
-  let offset = 32;
-  offset += 1 + (data[offset] === 1 ? 32 : 0);
+  // DataView over the raw bytes rather than `data.subarray(8)
+  // .readBigUInt64LE(...)`: under Hermes `subarray` returns a plain
+  // Uint8Array, which has no Buffer read methods (seen on device).
+  const bytes = account.data;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8 + 32;
+  offset += 1 + (bytes[offset] === 1 ? 32 : 0);
   offset += 32 + 1 + 1;
   return {
-    txCounter: data.readBigUInt64LE(offset),
-    pointDepositCounter: data.readBigUInt64LE(offset + 8),
+    txCounter: view.getBigUint64(offset, true),
+    pointDepositCounter: view.getBigUint64(offset + 8, true),
   };
 }
