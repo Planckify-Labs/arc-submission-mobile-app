@@ -42,7 +42,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: getAppName(),
   slug: "takumiwallet",
-  version: "5.25.1",
+  version: "5.26.0",
   runtimeVersion: { policy: "fingerprint" },
   updates: {
     fallbackToCacheTimeout: 0,
