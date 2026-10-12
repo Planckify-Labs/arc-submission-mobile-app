@@ -14,9 +14,19 @@
  *
  * The token itself is minted per-device at runtime rather than baked into the
  * bundle; `proxyToken.ts` explains why, and holds the cache this module reads.
+ *
+ * Prefer `proxyFetch` (or `withProxyAuth` for a client with no fetch seam) over
+ * `proxyAuthHeaders`. The headers helper snapshots the token when a transport is
+ * built, so a client built before the first mint, or holding a token the proxy
+ * has since forgotten, gets 401 on every call. Callers that swallow read errors
+ * then show the wallet as empty: that is how Solana balances read as 0.
  */
 
-import { currentProxyToken, ensureProxyToken } from "./proxyToken";
+import {
+  currentProxyToken,
+  ensureProxyToken,
+  invalidateProxyToken,
+} from "./proxyToken";
 
 const proxyOrigins = new Set<string>();
 
@@ -67,17 +77,82 @@ export function proxyAuthHeaders(
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function bearer(token: string | null): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 /**
- * `fetchOptions` for a viem `http()` transport. Returns undefined when there is
- * nothing to add, so the transport keeps its default behaviour untouched.
+ * Sends a request with the proxy bearer read at send time, not at transport
+ * construction. For a proxy `url` it:
+ *
+ *  - waits for the first mint instead of sending the request out bare (the
+ *    fresh-install window);
+ *  - on a 401, drops the rejected token, mints a new one and sends once more.
+ *    The proxy keeps tokens in Valkey, so a flush or a `revokeDevice` makes a
+ *    still-unexpired token unknown to it.
+ *
+ * Any other `url` is sent once with no headers added. `isUnauthorized` exists
+ * because clients disagree on what a 401 looks like: `fetch` resolves with it,
+ * `@solana/kit` throws it.
+ */
+export async function withProxyAuth<T>(
+  url: string | undefined,
+  send: (headers: Record<string, string>) => Promise<T>,
+  isUnauthorized: (result: T) => boolean,
+): Promise<T> {
+  const origin = originOf(url);
+  if (!origin || !proxyOrigins.has(origin)) return send({});
+
+  await ensureProxyToken(origin);
+  const sent = currentProxyToken(origin);
+  const first = await send(bearer(sent));
+  if (!isUnauthorized(first)) return first;
+
+  await (sent ? invalidateProxyToken(origin, sent) : ensureProxyToken(origin));
+  const fresh = currentProxyToken(origin);
+  if (!fresh || fresh === sent) return first;
+  return send(bearer(fresh));
+}
+
+function urlOf(input: string | URL | Request): string {
+  if (typeof input === "string") return input;
+  return "href" in input ? input.href : input.url;
+}
+
+function withHeaders(
+  init: RequestInit | undefined,
+  extra: Record<string, string>,
+): RequestInit | undefined {
+  if (Object.keys(extra).length === 0) return init;
+  const headers = new Headers(init?.headers);
+  for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+  return { ...init, headers };
+}
+
+/**
+ * Drop-in `fetch` for anything that may be addressed to rpc-proxy: viem's
+ * `fetchFn`, web3.js `Connection`'s `fetch` option, and plain JSON-RPC posts.
+ * See `withProxyAuth` for what it adds over a header snapshot.
+ */
+export function proxyFetch(
+  input: string | URL | Request,
+  init?: RequestInit,
+): Promise<Response> {
+  return withProxyAuth(
+    urlOf(input),
+    (headers) => fetch(input, withHeaders(init, headers)),
+    (res) => res.status === 401,
+  );
+}
+
+/**
+ * Options for a viem `http()` transport. Undefined for anything that is not
+ * the proxy, so those transports keep viem's default fetch untouched.
  */
 export function rpcFetchOptions(
   url: string | undefined,
-): { fetchOptions: { headers: Record<string, string> } } | undefined {
-  const headers = proxyAuthHeaders(url);
-  return Object.keys(headers).length > 0
-    ? { fetchOptions: { headers } }
-    : undefined;
+): { fetchFn: typeof proxyFetch } | undefined {
+  return isProxyUrl(url) ? { fetchFn: proxyFetch } : undefined;
 }
 
 /** The URL a viem chain will actually be called on. */

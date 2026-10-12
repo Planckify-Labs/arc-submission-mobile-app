@@ -35,6 +35,7 @@ import {
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-base";
+import { proxyFetch } from "../../rpc/proxyAuth.ts";
 import type {
   ClearSigningDescriptor,
   ComputeSigningDigestArgs,
@@ -297,7 +298,7 @@ async function sorobanGetLedgerEntries(
   rpcUrl: string,
   keysBase64: string[],
 ): Promise<GetLedgerEntriesResponse> {
-  const res = await fetch(rpcUrl, {
+  const res = await proxyFetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

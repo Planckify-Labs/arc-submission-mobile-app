@@ -108,7 +108,12 @@ import {
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import {
+  type Connection,
+  PublicKey,
+  TransactionInstruction,
+} from "@solana/web3.js";
+import { solanaConnection } from "@/services/rpc/solanaRpcPool";
 import { DefiError } from "../errors/defiErrors";
 import { maxInFor, minOutFor } from "../slippage";
 import type {
@@ -263,10 +268,7 @@ function devWarn(scope: string, err: unknown): void {
 }
 
 function makeConnection(rpcUrl: string | undefined): Connection {
-  return new Connection(
-    rpcUrl || "https://api.mainnet-beta.solana.com",
-    "confirmed",
-  );
+  return solanaConnection(rpcUrl || "https://api.mainnet-beta.solana.com");
 }
 
 function requireAmmV4Target(target: DepositTarget | undefined): {

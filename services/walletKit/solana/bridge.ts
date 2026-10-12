@@ -15,7 +15,6 @@
 
 import {
   address,
-  createSolanaRpc,
   createSolanaRpcSubscriptions,
   getBase64EncodedWireTransaction,
   isSolanaError,
@@ -35,6 +34,7 @@ import {
   base64ToTransaction,
   bytesToBase58,
 } from "@/services/chains/solana/codec";
+import { solanaRpcForUrl } from "@/services/rpc/solanaRpcPool";
 import { getSolanaSignerForWallet } from "@/services/walletService";
 import {
   type BridgeDestinationReadinessArgs,
@@ -109,7 +109,7 @@ export async function solanaSubmitBridgeExecution({
   const tx = base64ToTransaction(payload.payload);
   const signed = await partiallySignTransaction([signer.keyPair], tx);
 
-  const rpc = createSolanaRpc(chain.rpcUrl);
+  const rpc = solanaRpcForUrl(chain.rpcUrl);
   const wire = getBase64EncodedWireTransaction(signed);
 
   // The signature IS the transaction id, and it is known before anything
@@ -187,7 +187,7 @@ export async function solanaSimulateBridgeExecution({
     return { status: "unsupported" };
   }
   try {
-    const rpc = createSolanaRpc(chain.rpcUrl);
+    const rpc = solanaRpcForUrl(chain.rpcUrl);
     const owner = address(wallet.address);
 
     // Pre-state: SOL, then every candidate token account per watched mint.
@@ -288,7 +288,7 @@ const LANDED_POLL_INTERVAL_MS = 2_000;
  * transaction moved nothing and answers `false`.
  */
 async function signatureLanded(
-  rpc: ReturnType<typeof createSolanaRpc>,
+  rpc: ReturnType<typeof solanaRpcForUrl>,
   signature: string,
 ): Promise<boolean> {
   for (let i = 0; i < LANDED_POLL_ATTEMPTS; i++) {
@@ -332,7 +332,7 @@ export async function solanaCheckBridgeDestinationReadiness({
 }: BridgeDestinationReadinessArgs): Promise<BridgeReadinessBlocker[]> {
   if (chain.namespace !== SOLANA_NAMESPACE) return [];
 
-  const rpc = createSolanaRpc(chain.rpcUrl);
+  const rpc = solanaRpcForUrl(chain.rpcUrl);
 
   let lamports: bigint;
   try {

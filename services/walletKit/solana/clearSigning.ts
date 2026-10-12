@@ -28,6 +28,7 @@
 import { sha256 } from "@noble/hashes/sha2";
 import { PublicKey } from "@solana/web3.js";
 import { unzlibSync } from "fflate";
+import { proxyFetch } from "../../rpc/proxyAuth.ts";
 import type {
   ClearSigningDescriptor,
   ComputeSigningDigestArgs,
@@ -419,7 +420,7 @@ export async function fetchSolanaAccountData(
   rpcUrl: string,
   address: string,
 ): Promise<Uint8Array | null> {
-  const res = await fetch(rpcUrl, {
+  const res = await proxyFetch(rpcUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

@@ -110,6 +110,11 @@ function SimulationRow({
   return (
     <View className="border border-gray-200 rounded-xl p-3 mt-2">
       <Text className="text-xs text-gray-500 mb-1">Simulation</Text>
+      {s.failed && (
+        <Text className="text-xs text-red-700 mb-1">
+          This transaction is expected to fail.
+        </Text>
+      )}
       {s.unitsConsumed !== undefined && (
         <Text className="text-xs text-gray-700">
           Units consumed: {s.unitsConsumed.toLocaleString()}
@@ -127,7 +132,7 @@ function SimulationRow({
       )}
       {s.warnings.length > 0 && (
         <Text className="text-xs text-amber-800 mt-1">
-          {s.warnings.length} warning(s) — see risk banner.
+          {s.warnings.length} warning(s). See the risk banner.
         </Text>
       )}
     </View>

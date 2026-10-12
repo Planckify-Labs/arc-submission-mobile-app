@@ -49,8 +49,9 @@ import {
   getUserLendingPositionByAsset,
   getWithdrawIxs,
 } from "@jup-ag/lend/earn";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { type Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
+import { solanaConnection } from "@/services/rpc/solanaRpcPool";
 import { DefiError } from "../errors/defiErrors";
 import type {
   BuildDepositArgs,
@@ -72,10 +73,7 @@ function devWarn(scope: string, err: unknown): void {
 }
 
 function makeConnection(rpcUrl: string | undefined): Connection {
-  return new Connection(
-    rpcUrl || "https://api.mainnet-beta.solana.com",
-    "confirmed",
-  );
+  return solanaConnection(rpcUrl || "https://api.mainnet-beta.solana.com");
 }
 
 function requireJupiterLendTarget(

@@ -14,6 +14,7 @@ import {
   clearSolanaRpcCache,
   getSolanaRpc,
   getSolanaRpcSubscriptions,
+  setSolanaClusterRpcResolver,
 } from "./solanaRpcPool.ts";
 
 // Fake RPC whose counters the tests inspect.
@@ -43,12 +44,49 @@ function makeFake() {
   };
 }
 
+let builtFor: string[] = [];
+
 beforeEach(() => {
   clearSolanaRpcCache();
+  setSolanaClusterRpcResolver(() => null);
   sendCalls = {};
   failNext429 = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  __setRpcFactoryForTests(() => makeFake() as any);
+  builtFor = [];
+  __setRpcFactoryForTests((url) => {
+    builtFor.push(url);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return makeFake() as any;
+  });
+});
+
+// 2026-10-12: the cluster URL used to be `${EXPO_PUBLIC_API_URL}/solana/
+// {cluster}/rpc`, a route the API never served, so dApp simulation never got
+// a result. It now comes from the `/blockchains` feed like every other client.
+describe("getSolanaRpc — URL from the blockchains feed", () => {
+  it("calls the feed's rpcUrl for the cluster", () => {
+    setSolanaClusterRpcResolver((cluster) =>
+      cluster === "devnet" ? "https://rpc.example/solana/devnet" : null,
+    );
+    getSolanaRpc("devnet");
+    assert.deepEqual(builtFor, ["https://rpc.example/solana/devnet"]);
+  });
+
+  it("falls back to the public cluster in dev when the feed has no row", () => {
+    getSolanaRpc("devnet");
+    assert.deepEqual(builtFor, ["https://api.devnet.solana.com"]);
+  });
+
+  it("replaces a client once the feed URL arrives or changes", () => {
+    getSolanaRpc("devnet");
+    getSolanaRpc("devnet");
+    setSolanaClusterRpcResolver(() => "https://rpc.example/solana/devnet");
+    getSolanaRpc("devnet");
+    getSolanaRpc("devnet");
+    assert.deepEqual(builtFor, [
+      "https://api.devnet.solana.com",
+      "https://rpc.example/solana/devnet",
+    ]);
+  });
 });
 
 describe("getSolanaRpc — retry on 429", () => {

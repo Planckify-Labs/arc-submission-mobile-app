@@ -21,7 +21,7 @@ import {
   assertStellarChain,
   getStellarMainnetChain,
 } from "@/constants/configs/chainConfig";
-import { proxyAuthHeaders } from "@/services/rpc/proxyAuth";
+import { proxyFetch } from "@/services/rpc/proxyAuth";
 import { bytesToBase64 } from "./base64";
 
 /**
@@ -159,9 +159,7 @@ export function getHorizonClient(
       return chain.network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
     },
     async loadAccount(address: string): Promise<HorizonAccount> {
-      const res = await fetch(`${horizonUrl}/accounts/${address}`, {
-        headers: proxyAuthHeaders(horizonUrl),
-      });
+      const res = await proxyFetch(`${horizonUrl}/accounts/${address}`);
       if (!res.ok) {
         let body: unknown;
         try {
@@ -181,12 +179,9 @@ export function getHorizonClient(
       // templating) — the standard, battle-tested way to build a
       // form-encoded body under RN's `fetch`; also sets the right
       // `Content-Length` semantics implicitly.
-      const res = await fetch(`${horizonUrl}/transactions`, {
+      const res = await proxyFetch(`${horizonUrl}/transactions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          ...proxyAuthHeaders(horizonUrl),
-        },
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ tx: xdr }).toString(),
       });
       const json = (await res.json()) as {

@@ -24,11 +24,7 @@
 import { validateMnemonic } from "@scure/bip39";
 import { wordlist as englishWordlist } from "@scure/bip39/wordlists/english";
 import type { KeyPairSigner } from "@solana/kit";
-import {
-  address,
-  createSolanaRpc,
-  createSolanaRpcSubscriptions,
-} from "@solana/kit";
+import { address, createSolanaRpcSubscriptions } from "@solana/kit";
 
 import type { ChainConfig } from "../../../constants/configs/chainConfig.ts";
 import type { TWallet } from "../../../constants/types/walletTypes.ts";
@@ -49,6 +45,7 @@ import {
   buildAndSendSolTransfer,
   getSolanaBalance,
 } from "../../chains/solana/transferService.ts";
+import { solanaConnection, solanaRpcForUrl } from "../../rpc/solanaRpcPool.ts";
 import {
   generateWalletMnemonic,
   getPrivateKeyForWallet,
@@ -246,7 +243,7 @@ export function createSolanaWalletKit(): WalletKitAdapter {
       chain: ChainConfig,
     ): Promise<bigint> {
       assertSolana(chain);
-      const rpc = createSolanaRpc(chain.rpcUrl);
+      const rpc = solanaRpcForUrl(chain.rpcUrl);
       return getSolanaBalance(rpc, address);
     },
 
@@ -256,7 +253,7 @@ export function createSolanaWalletKit(): WalletKitAdapter {
       contractAddress: string,
     ): Promise<bigint> {
       assertSolana(chain);
-      const rpc = createSolanaRpc(chain.rpcUrl);
+      const rpc = solanaRpcForUrl(chain.rpcUrl);
       const { value: accounts } = await rpc
         .getTokenAccountsByOwner(
           address(ownerAddress),
@@ -285,7 +282,7 @@ export function createSolanaWalletKit(): WalletKitAdapter {
       if (!signer) {
         throw new Error("No Solana signer for wallet");
       }
-      const rpc = createSolanaRpc(chain.rpcUrl);
+      const rpc = solanaRpcForUrl(chain.rpcUrl);
       const rpcSubs = chain.rpcSubscriptionsUrl
         ? createSolanaRpcSubscriptions(chain.rpcSubscriptionsUrl)
         : undefined;
@@ -313,7 +310,7 @@ export function createSolanaWalletKit(): WalletKitAdapter {
       if (!signer) {
         throw new Error("No Solana signer for wallet");
       }
-      const rpc = createSolanaRpc(chain.rpcUrl);
+      const rpc = solanaRpcForUrl(chain.rpcUrl);
       const rpcSubs = chain.rpcSubscriptionsUrl
         ? createSolanaRpcSubscriptions(chain.rpcSubscriptionsUrl)
         : undefined;
@@ -345,7 +342,7 @@ export function createSolanaWalletKit(): WalletKitAdapter {
       assertSolana(chain);
       const lamports = token
         ? await estimateSplTransferFeeLamports({
-            rpc: createSolanaRpc(chain.rpcUrl),
+            rpc: solanaRpcForUrl(chain.rpcUrl),
             to,
             mint: token.contractAddress,
           })
@@ -398,14 +395,13 @@ export function createSolanaWalletKit(): WalletKitAdapter {
         throw new Error("No Solana signer for wallet");
       }
 
-      const rpc = createSolanaRpc(args.chain.rpcUrl);
+      const rpc = solanaRpcForUrl(args.chain.rpcUrl);
 
       const {
         TransactionMessage,
         VersionedTransaction,
         PublicKey: PK,
         Keypair,
-        Connection,
       } = await import("@solana/web3.js");
       const { parseSolanaPrivateKey } = await import(
         "@/services/chains/solana/codec"
@@ -450,7 +446,7 @@ export function createSolanaWalletKit(): WalletKitAdapter {
       );
       tx.sign([keypair, ...(args.additionalSigners ?? [])]);
 
-      const connection = new Connection(args.chain.rpcUrl, "confirmed");
+      const connection = solanaConnection(args.chain.rpcUrl);
       const signature = await connection.sendRawTransaction(tx.serialize(), {
         skipPreflight: false,
         preflightCommitment: "confirmed",

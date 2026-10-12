@@ -64,8 +64,9 @@
  */
 
 import { getAssociatedTokenAddressSync, getMint } from "@solana/spl-token";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { type Connection, PublicKey } from "@solana/web3.js";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
+import { solanaConnection } from "@/services/rpc/solanaRpcPool";
 import {
   getSolanaLstConfig,
   isSolanaLstVenue,
@@ -97,7 +98,7 @@ function rpcUrlFor(chainId: number | string): string {
 }
 
 function connectionFor(chainId: number | string): Connection {
-  return new Connection(rpcUrlFor(chainId), "confirmed");
+  return solanaConnection(rpcUrlFor(chainId));
 }
 
 // ── Pinned program ids — grepped from each adapter's own already-verified

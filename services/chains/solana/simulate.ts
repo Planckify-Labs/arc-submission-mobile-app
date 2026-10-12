@@ -13,15 +13,17 @@ import type {
   SolanaSimulationWarning,
 } from "./payloads";
 
+interface SimulatedAccount {
+  lamports: number | bigint;
+  owner: string;
+  data?: unknown;
+}
+
 interface SimulateResponse {
-  unitsConsumed?: number;
-  logs?: string[];
+  unitsConsumed?: number | bigint;
+  logs?: string[] | null;
   err?: unknown;
-  accounts?: Array<{
-    lamports: number | bigint;
-    owner: string;
-    data?: unknown;
-  } | null>;
+  accounts?: Array<SimulatedAccount | null> | null;
   returnData?: unknown;
 }
 
@@ -39,43 +41,58 @@ export interface SimulateInput {
   }>;
 }
 
+/**
+ * Throws when the RPC call itself fails, so the inspector can tell "the
+ * simulation could not run" (no summary) from "it ran and found nothing".
+ * A transaction that would fail on-chain is a result, not a throw: it comes
+ * back with `failed: true`.
+ */
 export async function simulateTransaction(
   rpc: Rpc<SolanaRpcApi>,
   input: SimulateInput,
 ): Promise<SolanaSimulationSummary> {
   const warnings: SolanaSimulationWarning[] = [];
-  let response: SimulateResponse = {};
-  try {
+  const writable = input.writableAccounts ?? [];
+
+  // `simulateTransaction` reports post-state only, so the pre-state is read
+  // alongside it to turn balances into deltas.
+  const [simulated, pre] = await Promise.all([
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const raw = (await (rpc as any)
+    (rpc as any)
       .simulateTransaction(input.txBase64, {
         encoding: "base64",
         replaceRecentBlockhash: true,
-        accounts: input.writableAccounts
-          ? {
-              encoding: "base64",
-              addresses: input.writableAccounts,
-            }
-          : undefined,
+        accounts:
+          writable.length > 0
+            ? { encoding: "base64", addresses: writable }
+            : undefined,
       })
-      .send()) as { value?: SimulateResponse } | undefined;
-    response = raw?.value ?? {};
-  } catch {
-    // Simulation failure is not fatal — the sheet surfaces the lack of
-    // data; the signer path still runs.
-  }
+      .send() as Promise<{ value?: SimulateResponse } | undefined>,
+    writable.length > 0
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ((rpc as any)
+          .getMultipleAccounts(writable, {
+            encoding: "base64",
+            dataSlice: { offset: 0, length: 0 },
+          })
+          .send() as Promise<{ value?: Array<SimulatedAccount | null> }>)
+      : Promise.resolve({ value: [] }),
+  ]);
+  const response: SimulateResponse = simulated?.value ?? {};
 
   const balanceChanges: SolanaSimulationSummary["balanceChanges"] = [];
   const tokenChanges: SolanaSimulationSummary["tokenChanges"] = [];
 
-  if (Array.isArray(response.accounts) && input.writableAccounts) {
-    for (let i = 0; i < input.writableAccounts.length; i++) {
-      const acc = response.accounts[i];
-      if (!acc) continue;
-      balanceChanges.push({
-        address: input.writableAccounts[i],
-        lamportsDelta: BigInt(acc.lamports) - 0n, // pre-balance unknown here; sheet renders abs post-balance.
-      });
+  if (Array.isArray(response.accounts)) {
+    for (let i = 0; i < writable.length; i++) {
+      const after = response.accounts[i];
+      if (!after) continue;
+      const before = pre?.value?.[i];
+      const lamportsDelta =
+        BigInt(after.lamports) - BigInt(before?.lamports ?? 0);
+      if (lamportsDelta !== 0n) {
+        balanceChanges.push({ address: writable[i], lamportsDelta });
+      }
     }
   }
 
@@ -84,10 +101,19 @@ export async function simulateTransaction(
   // still render when the inspector is off.
   void tokenChanges;
 
+  const failed = response.err != null;
+  if (failed && typeof __DEV__ !== "undefined" && __DEV__) {
+    // Raw program error: logs only, it is machine-shaped.
+    console.warn("[solana simulate] transaction would fail", response.err);
+  }
+
+  // `@solana/kit` returns u64 fields as bigint.
+  const units = response.unitsConsumed;
   return {
+    failed,
     unitsConsumed:
-      typeof response.unitsConsumed === "number"
-        ? response.unitsConsumed
+      typeof units === "bigint" || typeof units === "number"
+        ? Number(units)
         : undefined,
     balanceChanges,
     tokenChanges,

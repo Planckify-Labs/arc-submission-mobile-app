@@ -19,6 +19,7 @@
 
 import { toBase58 } from "@mysten/bcs";
 import { blake2b } from "@noble/hashes/blake2";
+import { proxyFetch } from "../../rpc/proxyAuth.ts";
 import type {
   ClearSigningDescriptor,
   ComputeSigningDigestArgs,
@@ -125,7 +126,7 @@ export type SuiRpcCall = (
 /** Default seam: plain JSON-RPC POST against the bound fullnode. */
 export function makeSuiRpcCall(rpcUrl: string): SuiRpcCall {
   return async (method, params) => {
-    const res = await fetch(rpcUrl, {
+    const res = await proxyFetch(rpcUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),

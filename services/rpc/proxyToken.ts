@@ -51,11 +51,18 @@ const DEVICE_ID_KEY = "rpc_proxy_device_id";
 const tokenKey = (origin: string) => `rpc_proxy_token:${origin}`;
 
 /**
- * Re-mint this long before expiry. Wide because viem captures `fetchOptions`
- * when a transport is built: a token that expires while a long-lived client
- * holds it produces 401s the transport cannot recover from on its own.
+ * Re-mint this long before expiry. Clients going through `proxyFetch` pick up
+ * the new token on their next request, but a transport still built from a
+ * `proxyAuthHeaders` snapshot keeps the old one, so the margin stays wide.
  */
 const REFRESH_AHEAD_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How long a failed mint holds off the next attempt. `proxyFetch` asks for a
+ * token on every proxied request, so without this an unreachable `/token`
+ * would be hit once per RPC call, and the proxy rate-limits mints per IP.
+ */
+const MINT_RETRY_AFTER_MS = 15 * 1000;
 
 interface TokenEntry {
   token: string;
@@ -65,6 +72,7 @@ interface TokenEntry {
 const tokens = new Map<string, TokenEntry>();
 /** Dedupes concurrent mints per origin — chains boot in parallel. */
 const inFlight = new Map<string, Promise<void>>();
+const lastMintFailure = new Map<string, number>();
 
 function freshUuid(): string {
   const webCrypto = (globalThis as { crypto?: { randomUUID?: () => string } })
@@ -160,9 +168,17 @@ export function ensureProxyToken(origin: string): Promise<void> {
   if (entry && entry.expiresAt - REFRESH_AHEAD_MS > Date.now()) {
     return Promise.resolve();
   }
+  const failedAt = lastMintFailure.get(origin);
+  if (failedAt !== undefined && Date.now() - failedAt < MINT_RETRY_AFTER_MS) {
+    return Promise.resolve();
+  }
 
   const run = mint(origin)
+    .then(() => {
+      lastMintFailure.delete(origin);
+    })
     .catch((err) => {
+      lastMintFailure.set(origin, Date.now());
       if (typeof __DEV__ !== "undefined" && __DEV__) {
         console.warn("[proxyToken] mint failed", origin, err);
       }
@@ -177,9 +193,20 @@ export function ensureProxyToken(origin: string): Promise<void> {
 /**
  * Drops the token for `origin` and mints a fresh one. For a caller that can
  * observe a 401 from the proxy, which means the token was revoked or expired
- * out from under a transport that captured it.
+ * out from under a transport that captured it. The proxy keeps tokens in
+ * Valkey, so a flush there forgets every token at once.
+ *
+ * `rejected` is the token the 401 answered. When several requests fail on the
+ * same dead token, only the first one's call drops it; the rest find a newer
+ * token already in place and leave it alone instead of minting again.
  */
-export function invalidateProxyToken(origin: string): Promise<void> {
+export function invalidateProxyToken(
+  origin: string,
+  rejected?: string,
+): Promise<void> {
+  if (rejected !== undefined && entryFor(origin)?.token !== rejected) {
+    return ensureProxyToken(origin);
+  }
   tokens.delete(origin);
   storage.remove(tokenKey(origin));
   return ensureProxyToken(origin);
@@ -189,4 +216,5 @@ export function invalidateProxyToken(origin: string): Promise<void> {
 export function __resetProxyTokensForTest(): void {
   tokens.clear();
   inFlight.clear();
+  lastMintFailure.clear();
 }

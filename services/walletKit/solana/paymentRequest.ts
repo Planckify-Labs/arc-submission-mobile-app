@@ -16,7 +16,6 @@ import {
   appendTransactionMessageInstruction,
   compileTransaction,
   createNoopSigner,
-  createSolanaRpc,
   createTransactionMessage,
   getBase64EncodedWireTransaction,
   type Instruction,
@@ -51,6 +50,7 @@ import {
   type Provenance,
 } from "@/services/deeplinks/types";
 import type { PaymentIntent } from "@/services/paymentIntent/types";
+import { solanaRpcForUrl } from "@/services/rpc/solanaRpcPool";
 
 const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr" as Address;
@@ -160,7 +160,7 @@ export async function buildSolanaPaymentRequest(args: {
     throw new DeepLinkBuildError("unsupported_operation");
   }
 
-  const rpc = createSolanaRpc(chain.rpcUrl);
+  const rpc = solanaRpcForUrl(chain.rpcUrl);
   const recipient = address(channel.address);
   const payer = createNoopSigner(address(wallet.address));
 
@@ -345,7 +345,7 @@ export async function buildSolanaPayTransactionRequest(args: {
       cluster === "devnet"
         ? "https://api.devnet.solana.com"
         : "https://api.mainnet-beta.solana.com";
-    const rpc = createSolanaRpc(rpcUrl);
+    const rpc = solanaRpcForUrl(rpcUrl);
     const { value: latest } = await rpc.getLatestBlockhash().send();
     if (decoded.version === "legacy") {
       const tx = Transaction.from(bytes);

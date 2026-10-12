@@ -2,7 +2,6 @@ import {
   SuiJsonRpcClient as SuiClient,
   JsonRpcHTTPTransport as SuiHTTPTransport,
 } from "@mysten/sui/jsonRpc";
-import { createSolanaRpc } from "@solana/kit";
 import type { WebView } from "react-native-webview";
 import { evmRenderers } from "@/components/dapps-browser/approvals/renderers";
 import { createEvmAdapter } from "@/services/chains/evm/EvmAdapter";
@@ -18,6 +17,7 @@ import { installSuiSigner } from "@/services/chains/sui/signer";
 import type { AdapterContext } from "@/services/chains/types";
 import { PermissionStore } from "@/services/permissions/store";
 import { proxyAuthHeaders } from "@/services/rpc/proxyAuth";
+import { solanaRpcForUrl } from "@/services/rpc/solanaRpcPool";
 import { subscribeAppLocked } from "@/services/security/appLockState";
 import { walletKitRegistry } from "@/services/walletKit/registry";
 import { initDappBridge } from "./DappBridge";
@@ -189,7 +189,7 @@ export function bootBridge(opts: BootOpts) {
           cluster === "devnet"
             ? "https://api.devnet.solana.com"
             : "https://api.mainnet-beta.solana.com";
-        return { rpc: createSolanaRpc(url) };
+        return { rpc: solanaRpcForUrl(url) };
       },
     });
   } else {

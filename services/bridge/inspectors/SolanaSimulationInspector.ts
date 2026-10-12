@@ -173,6 +173,17 @@ export const SolanaSimulationInspector: IntentInspector = {
       });
     }
 
+    if (summary?.failed) {
+      annotations.push({
+        code: "simulation.failed",
+        severity: "danger",
+        title: "Simulation failed",
+        detail:
+          "This transaction is expected to fail if you continue. Proceed with caution.",
+        source: "simulation",
+      });
+    }
+
     if (summary) {
       for (const w of summary.warnings) {
         const { title, detail } = describeWarning(w);

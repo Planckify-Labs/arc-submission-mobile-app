@@ -164,11 +164,18 @@ rejection ships as "the wallet does not work on my phone."
 - The two keys that previously sat in `mobile-app/.env` shipped in bundles and
   must be considered burned. Rotate `PROXY_API_KEY` in the rpc-proxy
   deployment; nothing client-side depends on it any more.
-- First launch after a fresh install has a short window between learning the
-  proxy origin and the mint completing, during which RPC calls go out
-  unauthenticated and the proxy answers 401. React Query's `retry: 1` covers
-  the common case. Subsequent launches rehydrate the token from MMKV
-  synchronously, so the window does not recur.
+- RPC clients read the token per request through `proxyFetch` /
+  `withProxyAuth` (`services/rpc/proxyAuth.ts`), not from a header snapshot
+  taken when the transport was built. A request issued before the first mint
+  waits for it. A 401 from the proxy (token unknown to it, e.g. after a Valkey
+  flush or `revokeDevice`) drops the token, mints a new one and retries once.
+  A failed mint backs off for 15s so a dead `/token` is not hit per request.
+  `proxyAuthHeaders` remains only for transports with no fetch seam that talk
+  to public endpoints (the dApp bridge's Sui signer).
+- Every Solana client goes through `solanaRpcForUrl` / `solanaConnection` in
+  `services/rpc/solanaRpcPool.ts`. A bare `createSolanaRpc(url)` or
+  `new Connection(url)` sends no bearer, and that is how Solana balances read
+  as 0 (2026-10-12). `proxyAuth.test.ts` sweeps the tree for both.
 - Verify on device with `adb shell am force-stop` before retesting: Fast
   Refresh does not re-run module-scope side effects, so a reload will silently
   exercise the previous credential path.

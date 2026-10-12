@@ -15,7 +15,7 @@
 import { Networks } from "@stellar/stellar-base";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import { assertStellarChain } from "@/constants/configs/chainConfig";
-import { proxyAuthHeaders } from "@/services/rpc/proxyAuth";
+import { proxyFetch } from "@/services/rpc/proxyAuth";
 
 /** Structured Soroban RPC failure — mirrors `HorizonRequestError`'s shape. */
 export class SorobanRpcError extends Error {
@@ -100,15 +100,12 @@ async function rpcCall<T>(
 ): Promise<T> {
   // The wallet's Soroban endpoint is the same authenticated rpc-proxy the
   // EVM chains use, and a plain `fetch` sent it no bearer — every read
-  // came back 401. `proxyAuthHeaders` is origin-gated on what the
-  // backend feed registered, so a public Soroban endpoint still gets no
-  // header and our key never leaves our own infrastructure.
-  const res = await fetch(rpcUrl, {
+  // came back 401. `proxyFetch` is origin-gated on what the backend feed
+  // registered, so a public Soroban endpoint still gets no header and our
+  // key never leaves our own infrastructure.
+  const res = await proxyFetch(rpcUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...proxyAuthHeaders(rpcUrl),
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
   if (!res.ok) {

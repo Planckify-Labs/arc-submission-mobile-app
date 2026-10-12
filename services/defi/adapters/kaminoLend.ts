@@ -88,12 +88,13 @@ import {
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import {
-  Connection,
+  type Connection,
   PublicKey,
   SYSVAR_RENT_PUBKEY,
   SystemProgram,
   TransactionInstruction,
 } from "@solana/web3.js";
+import { solanaConnection } from "@/services/rpc/solanaRpcPool";
 import { DefiError } from "../errors/defiErrors";
 import type {
   BuildDepositArgs,
@@ -162,10 +163,7 @@ function devWarn(scope: string, err: unknown): void {
 }
 
 function makeConnection(rpcUrl: string | undefined): Connection {
-  return new Connection(
-    rpcUrl || "https://api.mainnet-beta.solana.com",
-    "confirmed",
-  );
+  return solanaConnection(rpcUrl || "https://api.mainnet-beta.solana.com");
 }
 
 function requireReserveTarget(target: DepositTarget | undefined): {

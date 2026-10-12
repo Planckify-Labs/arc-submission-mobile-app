@@ -33,7 +33,7 @@ import type { ApproveTargetKind } from "@/services/decoders/calldata";
 import { validateTypedData } from "@/services/decoders/typedDataValidate";
 import { originKey } from "@/services/permissions/caip";
 import { PermissionStore } from "@/services/permissions/store";
-import { proxyAuthHeaders, rpcFetchOptions } from "@/services/rpc/proxyAuth";
+import { rpcFetchOptions } from "@/services/rpc/proxyAuth";
 import { isDefaultToken } from "@/services/tokens/tokenList";
 import { addWatchedAsset } from "@/services/tokens/watchedAssets";
 import { getAccountForWallet } from "@/services/walletService";
@@ -141,7 +141,7 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  *
  * Two header sources, and they are for different endpoints:
  *
- *  - **`proxyAuthHeaders`** attaches our `Authorization: Bearer` to the
+ *  - **`rpcFetchOptions`** attaches our `Authorization: Bearer` to the
  *    rpc-proxy, and *only* to it. Every other client in the app
  *    (`utils/clients.ts`, `MultiProvider`) already did this; the dApp
  *    bridge did not, so every read a dApp made through the proxy came
@@ -157,7 +157,7 @@ function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
  *    wallet's native fetch.
  *
  * They never apply to the same URL, and that separation is the point:
- * `proxyAuthHeaders` is origin-gated on the set the backend feed
+ * `rpcFetchOptions` is origin-gated on the set the backend feed
  * registered, so a dApp-added RPC can never receive our bearer. Spraying
  * the key at every endpoint would both break direct-to-provider calls
  * (Alchemy answers 401 to an unexpected bearer) and leak our token into
@@ -167,13 +167,12 @@ function httpTransport(
   config: ChainConfig,
   extra?: { retryCount?: number; timeout?: number },
 ) {
-  const headers = {
-    ...proxyAuthHeaders(config.rpcUrl),
-    ...(config.fetchHeaders ?? {}),
-  };
   return http(config.rpcUrl, {
     ...(extra ?? {}),
-    ...(Object.keys(headers).length > 0 ? { fetchOptions: { headers } } : {}),
+    ...(rpcFetchOptions(config.rpcUrl) ?? {}),
+    ...(config.fetchHeaders
+      ? { fetchOptions: { headers: config.fetchHeaders } }
+      : {}),
   });
 }
 

@@ -1,4 +1,4 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import { storage } from "@/lib/storage/mmkv";
 import {
@@ -8,6 +8,7 @@ import {
 import { computeRefIdHash } from "@/services/chains/solana/takumiPay/refIdHash";
 import { buildCreateTransactionInstruction } from "@/services/nanopay/solana/buildCreateTransaction";
 import { buildDepositPointsInstruction } from "@/services/nanopay/solana/buildDepositPoints";
+import { solanaConnection } from "@/services/rpc/solanaRpcPool";
 import { walletKitRegistry } from "@/services/walletKit/registry";
 import {
   ExecutorError,
@@ -50,7 +51,7 @@ function getSolanaKit() {
 }
 
 async function fetchTakumiPayConfig(rpcUrl: string, programId: PublicKey) {
-  const connection = new Connection(rpcUrl, "confirmed");
+  const connection = solanaConnection(rpcUrl);
   const [configPda] = deriveConfigPda(programId);
   const accountInfo = await connection.getAccountInfo(configPda);
   if (!accountInfo) {

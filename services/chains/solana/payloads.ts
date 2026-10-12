@@ -131,6 +131,8 @@ export type SolanaSimulationWarning =
   | { code: "setAuthority"; account: string; to: string };
 
 export type SolanaSimulationSummary = {
+  /** The transaction would fail if sent now. */
+  failed?: boolean;
   unitsConsumed?: number;
   balanceChanges: Array<{ address: string; lamportsDelta: bigint }>;
   tokenChanges: Array<{

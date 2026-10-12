@@ -20,6 +20,7 @@ import type { TBlockchain } from "@/api/types/blockchain";
 import type { TWallet } from "@/constants/types/walletTypes";
 import { buildChainConfigFromBlockchain } from "@/hooks/useWallet.helpers";
 import { readActiveBlockchainRows } from "@/services/blockchains/cache";
+import { setSolanaClusterRpcResolver } from "@/services/rpc/solanaRpcPool";
 import { getAccountForWallet } from "@/services/walletService";
 import { bootBridge } from "./boot";
 
@@ -73,6 +74,23 @@ function resolveDefaultEvmChain(): EvmAdapterChain | null {
   return evmConfigFromRow(first);
 }
 
+/**
+ * The feed's RPC for a Solana cluster, for `getSolanaRpc` (dApp transaction
+ * simulation, watch-token mint checks). Matched the way the wallet builds its
+ * own Solana chain configs, which also registers the proxy origin so the call
+ * carries the device token.
+ */
+function solanaClusterRpc(cluster: string): string | null {
+  for (const row of readActiveBlockchainRows() ?? []) {
+    if (row.isEVM || !row.rpcUrl) continue;
+    const cfg = buildChainConfigFromBlockchain(row);
+    if (cfg.namespace === "solana" && cfg.cluster === cluster) {
+      return cfg.rpcUrl;
+    }
+  }
+  return null;
+}
+
 let rootBooted = false;
 
 /**
@@ -81,6 +99,7 @@ let rootBooted = false;
 export function bootBridgeAtRoot(): void {
   if (rootBooted) return;
   rootBooted = true;
+  setSolanaClusterRpcResolver(solanaClusterRpc);
   bootBridge({
     getContext: () => ({
       activeWallet: null,
