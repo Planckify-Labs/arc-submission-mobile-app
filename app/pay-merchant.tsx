@@ -132,7 +132,6 @@ import {
   type OnchainSubmitRequest,
   type OnchainSubmitResponse,
   onchainSubmitEndpoint,
-  postOnchainSubmit,
   submitOnchainWithRetry,
 } from "@/services/nanopay/pathOnchainSettlement";
 import { executeOnchainSettlementStellar } from "@/services/nanopay/pathOnchainSettlementStellar";
@@ -887,12 +886,12 @@ function OnchainCard({
   const [phase, setPhase] = useState<LocalPhase>("idle");
   const [error, setError] = useState<LocalError | null>(null);
   const [isPinVisible, setIsPinVisible] = useState(false);
-  // Once the EVM payment tx is broadcast it must never be signed again for
-  // this intent: the contract rejects a second `processMerchantPayment`
-  // for the same refId, and the user would otherwise see "something went
-  // wrong" after paying twice-in-spirit. A retry re-runs only the
+  // Once the payment tx is broadcast (any chain) it must never be signed
+  // again for this intent: the contract rejects a second payment for the
+  // same refId, and the user would otherwise see "something went wrong"
+  // after paying twice-in-spirit. A retry re-runs only the
   // confirm-and-submit half against this hash.
-  const broadcastTxHashRef = useRef<`0x${string}` | null>(null);
+  const broadcastTxHashRef = useRef<string | null>(null);
   // Which real stage the payment is in, for the progress card. Advanced
   // only when the stage actually completes (broadcast, receipt, server
   // verdict), never on a timer — so a tick is a promise kept, not an
@@ -1109,6 +1108,45 @@ function OnchainCard({
     const advance = (step: PayStep) =>
       setPayStep({ step, startedAt: Date.now() });
 
+    // After broadcast, every chain does the same thing: hand the hash to
+    // the backend, which verifies it against the chain on its own queue,
+    // and keep the progress card up until the intent poll reports `paid`
+    // (the receipt opens) or `failed`. The user may leave from here; the
+    // poll or push carries the result. The tx is already out, so a failed
+    // submit is retried with the same hash and is never a reason to sign
+    // again.
+    const handOff = async (txHash: string) => {
+      setPhase("submitting");
+      advance("send");
+      try {
+        await submitOnchainWithRetry({
+          intentId,
+          txHash,
+          blockchainId: intent.blockchainId!,
+          poster: defaultOnchainSubmitPoster,
+        });
+        advance("verify");
+        // Poll immediately (and, while `settling`, every second — see
+        // useIntentStatus) so a fast chain opens the receipt in ~1-2s.
+        queryClient.invalidateQueries({
+          queryKey: ["pay-intent", intentId],
+        });
+      } catch (err) {
+        if (__DEV__) {
+          console.warn(
+            `[pay-merchant] onchain submit failed intent=${intentId} txHash=${txHash}`,
+            err,
+          );
+        }
+        // Whatever kept the hash from reaching the server (network, 5xx,
+        // or a 400 for a chain we've misconfigured), the payment tx is
+        // already out. Keep the hash so "Check again" re-submits it.
+        setError(makeLocalError("settlement_unconfirmed"));
+        setPayStep(null);
+        setPhase("error");
+      }
+    };
+
     // Pre-flight on balances we already display. A wallet with nothing in
     // it should hear so here, in plain words, not after a PIN prompt and a
     // failed broadcast whose error we then have to translate. Only runs
@@ -1153,21 +1191,18 @@ function OnchainCard({
           return;
         }
 
-        const result = await executeOnchainSettlementSvm({
-          intent,
-          wallet: selectedWallet,
-          walletKit: kit,
-          chain: intentChainConfig,
-          programIdStr,
-        });
-
-        setPhase("submitting");
-        await postOnchainSubmit({
-          intentId,
-          txHash: result.txSignature,
-          blockchainId: intent.blockchainId!,
-          poster: defaultOnchainSubmitPoster,
-        }).catch(() => null);
+        if (!broadcastTxHashRef.current) {
+          const result = await executeOnchainSettlementSvm({
+            intent,
+            wallet: selectedWallet,
+            walletKit: kit,
+            chain: intentChainConfig,
+            programIdStr,
+          });
+          broadcastTxHashRef.current = result.txSignature;
+        }
+        await handOff(broadcastTxHashRef.current);
+        return;
       } else if (typeof kit.sendContractTransaction === "function") {
         const contractAddress = paymentContract?.address as
           | `0x${string}`
@@ -1196,46 +1231,8 @@ function OnchainCard({
           broadcastTxHashRef.current = txHash;
         }
 
-        setPhase("submitting");
-        advance("send");
-        // Hand the hash over right away; the backend records it and
-        // verifies against the chain on its own queue (receipt at the
-        // chain's confirmation depth, then the contract record). From
-        // here the user may leave: the status poll / push carries the
-        // result. The tx is already out, so a failed submit is retried
-        // with the same hash and is never a reason to sign again.
-        try {
-          await submitOnchainWithRetry({
-            intentId,
-            txHash,
-            blockchainId: intent.blockchainId!,
-            poster: defaultOnchainSubmitPoster,
-          });
-          advance("verify");
-          // Poll immediately (and, while `settling`, every second — see
-          // useIntentStatus) so a fast chain opens the receipt in ~1-2s.
-          queryClient.invalidateQueries({
-            queryKey: ["pay-intent", intentId],
-          });
-          // Stay in "submitting": the progress card owns the screen until
-          // the poll reports `paid` (receipt) or `failed`.
-          return;
-        } catch (err) {
-          if (__DEV__) {
-            console.warn(
-              `[pay-merchant] onchain submit failed intent=${intentId} txHash=${txHash}`,
-              err,
-            );
-          }
-          // Whatever kept the hash from reaching the server (network,
-          // 5xx, or a 400 for a chain we've misconfigured), the payment
-          // tx is already out. Keep the hash so "Check again" re-submits
-          // it; never fall back to signing again.
-          setError(makeLocalError("settlement_unconfirmed"));
-          setPayStep(null);
-          setPhase("error");
-          return;
-        }
+        await handOff(txHash);
+        return;
       } else if (typeof kit.sendSorobanTransaction === "function") {
         // Prefer the intent's `takumiPayContractId` — the contract id the
         // backend signature is bound to — so the wallet submits to exactly the
@@ -1254,21 +1251,18 @@ function OnchainCard({
           return;
         }
 
-        const result = await executeOnchainSettlementStellar({
-          intent,
-          wallet: selectedWallet,
-          walletKit: kit,
-          chain: intentChainConfig,
-          contractId,
-        });
-
-        setPhase("submitting");
-        await postOnchainSubmit({
-          intentId,
-          txHash: result.txHash,
-          blockchainId: intent.blockchainId!,
-          poster: defaultOnchainSubmitPoster,
-        }).catch(() => null);
+        if (!broadcastTxHashRef.current) {
+          const result = await executeOnchainSettlementStellar({
+            intent,
+            wallet: selectedWallet,
+            walletKit: kit,
+            chain: intentChainConfig,
+            contractId,
+          });
+          broadcastTxHashRef.current = result.txHash;
+        }
+        await handOff(broadcastTxHashRef.current);
+        return;
       } else {
         setError(
           makeLocalError(
@@ -1279,9 +1273,6 @@ function OnchainCard({
         setPhase("error");
         return;
       }
-
-      setPayStep(null);
-      setPhase("settled");
     } catch (err) {
       setPayStep(null);
       setError(classifyError(err));
