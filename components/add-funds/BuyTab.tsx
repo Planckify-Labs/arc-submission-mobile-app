@@ -333,8 +333,7 @@ function BuyResult({
 }
 
 function BuyTab({ config, candidates, preferred, onSuggestTab }: Props) {
-  const { state, start, onPageMessage, leaveWidget, reset } =
-    useBuyFlow(config);
+  const { state, start, onPageMessage, leaveWidget, reset } = useBuyFlow();
   const { wallets, setActiveWallet } = useWallet();
   const { navigatingToAuth, goToAuth } = useGoToAuth();
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -425,6 +424,21 @@ function BuyTab({ config, candidates, preferred, onSuggestTab }: Props) {
             </View>
           ))}
         </View>
+
+        {!config.enabled ? (
+          <View className="mt-3 flex-row items-start gap-2 rounded-xl border border-light-matte-black/10 bg-light-main-container px-3 py-2.5">
+            <FlaskConical
+              size={14}
+              color="#20222c99"
+              style={{ marginTop: 1 }}
+            />
+            <Text className="flex-1 text-xs text-light-matte-black/70">
+              {config.disabledReason === "no_hosted_page"
+                ? "Dev preview: the server has no checkout page set yet, so checkout won't open."
+                : "Dev preview: the server has no onramp key yet, so checkout won't open."}
+            </Text>
+          </View>
+        ) : null}
 
         {sandbox ? (
           <View className="mt-3 flex-row items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">

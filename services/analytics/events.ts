@@ -145,10 +145,10 @@ export type AnalyticsEventProps = {
   deeplink_approved: { class: string; transport: string };
   // Add funds / Buy (docs/onramp-app-kit-spec.md §9). No amounts,
   // addresses or tokens: `code` is the widget's coarse code, `type` our
-  // own OnrampErrorCode, `host` bundled | hosted.
+  // own OnrampErrorCode.
   add_funds_tab_opened: { tab: string };
   onramp_opened: Record<string, never>;
-  onramp_session_minted: { host: string };
+  onramp_session_minted: Record<string, never>;
   onramp_widget_ready: Record<string, never>;
   onramp_submitted: Record<string, never>;
   onramp_settled: Record<string, never>;

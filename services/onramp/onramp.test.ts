@@ -19,7 +19,6 @@ import {
 import { resolveOnrampDestinations } from "./destinations";
 import { parseOnrampPageMessage } from "./messages";
 import {
-  decideBundledNavigation,
   decideHostedNavigation,
   isAllowedExternalLink,
   parseHttpUrl,
@@ -181,7 +180,7 @@ const CONFIG: TOnrampConfig = {
   enabled: true,
   environment: "sandbox",
   widgetBaseUrl: "https://onramp-sandbox.arc.io",
-  hostedPageUrl: null,
+  hostedPageUrl: "https://onramp.takumipay.xyz/v1/",
   support: [{ chainKey: "eip155:5042002", tokens: ["USDC", "EURC"] }],
   externalLinkHosts: ["arc.io"],
 };
@@ -212,6 +211,36 @@ describe("resolveOnrampDestinations", () => {
     });
     expect(r.preferred?.wallet).toBe(evmA);
     expect(r.candidates).toHaveLength(1);
+  });
+
+  it("offers a preview only when asked to, for a missing key or page", () => {
+    const noKey = {
+      ...CONFIG,
+      enabled: false,
+      disabledReason: "no_api_key" as const,
+    };
+    const base = { wallets: [evmA], activeWallet: evmA };
+    expect(
+      resolveOnrampDestinations({ ...base, config: noKey }).preferred,
+    ).toBeNull();
+    expect(
+      resolveOnrampDestinations({ ...base, config: noKey, allowPreview: true })
+        .preferred?.wallet,
+    ).toBe(evmA);
+    expect(
+      resolveOnrampDestinations({
+        ...base,
+        config: { ...noKey, disabledReason: "no_hosted_page" as const },
+        allowPreview: true,
+      }).preferred?.wallet,
+    ).toBe(evmA);
+    expect(
+      resolveOnrampDestinations({
+        ...base,
+        config: { ...noKey, disabledReason: "flag_off" as const },
+        allowPreview: true,
+      }).preferred,
+    ).toBeNull();
   });
 
   it("hides Buy when disabled, unsupported, or unowned", () => {
@@ -305,23 +334,5 @@ describe("navigation policy", () => {
         isTopFrame: false,
       }),
     ).toBe("block");
-  });
-
-  it("admits the dev server only in debug for the bundled host", () => {
-    const dev = "http://192.168.1.13:8081/_expo/@dom/onramp.tsx?file=x";
-    const base = { isTopFrame: true, externalLinkHosts: [] };
-    expect(decideBundledNavigation({ ...base, url: dev, isDev: true })).toBe(
-      "allow",
-    );
-    expect(decideBundledNavigation({ ...base, url: dev, isDev: false })).toBe(
-      "block",
-    );
-    expect(
-      decideBundledNavigation({
-        ...base,
-        url: "file:///android_asset/www.bundle/x.html",
-        isDev: false,
-      }),
-    ).toBe("allow");
   });
 });

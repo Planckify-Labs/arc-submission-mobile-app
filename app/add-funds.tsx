@@ -74,6 +74,7 @@ export default function AddFundsScreen() {
         config,
         wallets,
         activeWallet: activeWallet ?? null,
+        allowPreview: __DEV__,
       }),
     [config, wallets, activeWallet],
   );

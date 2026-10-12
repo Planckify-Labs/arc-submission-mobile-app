@@ -16,7 +16,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef } from "react";
 import { onrampApi } from "@/api/endpoints/onramp";
-import type { TOnrampConfig, TOnrampSession } from "@/api/types/onramp";
+import type { TOnrampSession } from "@/api/types/onramp";
 import QKEY_Wallets from "@/constants/queryKeys/walletQueryKeys";
 import useRQGlobalState from "@/hooks/useRQGlobalState";
 import { track } from "@/services/analytics/posthog";
@@ -93,7 +93,7 @@ function withReceipt(
   };
 }
 
-export function useBuyFlow(config: TOnrampConfig | null | undefined) {
+export function useBuyFlow() {
   const { state, setState } = useBuyState();
   const queryClient = useQueryClient();
   const current = useCallback(
@@ -134,9 +134,7 @@ export function useBuyFlow(config: TOnrampConfig | null | undefined) {
             chainKey: destination.chainKey,
           },
         );
-        track("onramp_session_minted", {
-          host: config?.hostedPageUrl ? "hosted" : "bundled",
-        });
+        track("onramp_session_minted");
         setState({
           phase: "widget",
           session,
@@ -157,7 +155,7 @@ export function useBuyFlow(config: TOnrampConfig | null | undefined) {
         });
       }
     },
-    [config?.hostedPageUrl, setState],
+    [setState],
   );
 
   const start = useCallback(

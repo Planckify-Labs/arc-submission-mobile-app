@@ -1,14 +1,17 @@
 /**
- * Hosts the onramp widget page in a hardened WebView.
+ * Hosts the onramp checkout page in a hardened WebView.
  *
- * Spec: docs/onramp-app-kit-spec.md §4.4, §4.5.1, §7.
+ * Spec: docs/onramp-app-kit-spec.md §4.5.1 (route A2), §7.
  *
- * Two hosts, one protocol (`services/onramp/messages.ts`):
- *   - `hostedPageUrl` set (route A2): a plain WebView on that https page,
- *     session handed over by `postMessage` after the page says `ready`.
- *   - otherwise: the bundled DOM component (Option B), session as a prop.
- * The server picks through `GET /onramp/config`, so production can move
- * to the hosted page without an app release.
+ * The page is the separate `takumipay-onramp` project, at the URL the
+ * server names in `GET /onramp/config` (`hostedPageUrl`). The session is
+ * handed over by `postMessage` after the page says `ready`
+ * (`services/onramp/messages.ts`).
+ *
+ * The app cannot host the widget itself: its CSP is `frame-ancestors
+ * https: http://localhost:*`, and a page bundled into the app loads from
+ * `file://` (release) or the Metro LAN address (debug), both refused, so
+ * the kit times out with PAGE_NOT_LOADED (verified 2026-10-10).
  *
  * What this WebView must never get: the dApp provider injection, a wallet
  * bridge, or any `injectedJavaScript`. Nothing that reaches it can ask the
@@ -21,6 +24,11 @@ import WebView, {
   type WebViewMessageEvent,
   type WebViewNavigation,
 } from "react-native-webview";
+// The package root re-exports only a few event types.
+import type {
+  WebViewErrorEvent,
+  WebViewHttpErrorEvent,
+} from "react-native-webview/lib/WebViewTypes";
 import type { TOnrampConfig, TOnrampSession } from "@/api/types/onramp";
 import { logOnrampDetail } from "@/services/errors/onrampErrors";
 import {
@@ -30,12 +38,10 @@ import {
   type TOnrampPageMessage,
 } from "@/services/onramp/messages";
 import {
-  decideBundledNavigation,
   decideHostedNavigation,
   parseHttpUrl,
   type TTopFrameDecision,
 } from "@/services/onramp/navigation";
-import OnrampWidget from "./OnrampWidget.dom";
 
 type Props = {
   session: TOnrampSession;
@@ -46,11 +52,7 @@ type Props = {
   onPageMessage: (message: TOnrampPageMessage) => void;
 };
 
-/**
- * Shared strict settings (mirrors the strict end of `app/dapps-browser`).
- * File access is off everywhere; for the bundled host this overrides the
- * permissive defaults Expo's DOM wrapper sets (spec §4.5).
- */
+/** Strict settings (mirrors the strict end of `app/dapps-browser`). */
 const HARDENED = {
   javaScriptEnabled: true,
   domStorageEnabled: true,
@@ -74,6 +76,13 @@ const HARDENED = {
   webviewDebuggingEnabled: __DEV__,
 };
 
+/**
+ * How long the page gets to say `ready`. Past this it is unreachable or
+ * not our page, and the user gets "try again" instead of a spinner that
+ * never ends. The widget has its own load watchdog after that.
+ */
+const PAGE_READY_TIMEOUT_MS = 20_000;
+
 function openExternal(url: string) {
   void WebBrowser.openBrowserAsync(url).catch((err) =>
     logOnrampDetail("external link failed", err),
@@ -88,61 +97,15 @@ function applyDecision(decision: TTopFrameDecision, url: string): boolean {
 }
 
 function OnrampWebView({ session, config, onPageMessage }: Props) {
-  return config.hostedPageUrl ? (
+  // The server only enables Buy with a page configured; nothing to host
+  // without one.
+  if (!config.hostedPageUrl) return null;
+  return (
     <HostedOnrampPage
       session={session}
       config={config}
       hostedPageUrl={config.hostedPageUrl}
       onPageMessage={onPageMessage}
-    />
-  ) : (
-    <BundledOnrampPage
-      session={session}
-      config={config}
-      onPageMessage={onPageMessage}
-    />
-  );
-}
-
-function BundledOnrampPage({ session, config, onPageMessage }: Props) {
-  const onShouldStartLoadWithRequest = useCallback(
-    (req: WebViewNavigation & { isTopFrame?: boolean }) =>
-      applyDecision(
-        decideBundledNavigation({
-          url: req.url,
-          isTopFrame: req.isTopFrame !== false,
-          isDev: __DEV__,
-          externalLinkHosts: config.externalLinkHosts,
-        }),
-        req.url,
-      ),
-    [config.externalLinkHosts],
-  );
-
-  // Native action: args cross the bridge from the WebView, so they are
-  // untrusted and re-validated here exactly like the hosted path.
-  const onMessage = useCallback(
-    async (raw: unknown) => {
-      const message = parseOnrampPageMessage(raw);
-      if (message) onPageMessage(message);
-    },
-    [onPageMessage],
-  );
-
-  return (
-    <OnrampWidget
-      session={session}
-      widgetBaseUrl={config.widgetBaseUrl}
-      onMessage={onMessage}
-      dom={{
-        ...HARDENED,
-        style: { flex: 1 },
-        // The DOM document itself loads from file:// (release) or the
-        // Metro dev server (debug); the decision function admits only
-        // those for the top frame.
-        originWhitelist: __DEV__ ? ["file://*", "http://*"] : ["file://*"],
-        onShouldStartLoadWithRequest,
-      }}
     />
   );
 }
@@ -157,9 +120,56 @@ function HostedOnrampPage({
   // Which session the page has been given. One per page load; a new
   // session remounts the WebView (keyed below) and gets sent once more.
   const sentSessionIdRef = useRef<string | null>(null);
-  const pageOrigin = useMemo(
-    () => parseHttpUrl(hostedPageUrl)?.origin ?? null,
-    [hostedPageUrl],
+  const pageUrl = useMemo(() => parseHttpUrl(hostedPageUrl), [hostedPageUrl]);
+  const pageOrigin = pageUrl?.origin ?? null;
+
+  // Set once the page says `ready` or its load has failed, so a failure
+  // is reported at most once per page load.
+  const settledRef = useRef(false);
+  const onPageMessageRef = useRef(onPageMessage);
+  onPageMessageRef.current = onPageMessage;
+
+  const failLoad = useCallback(
+    (detail: unknown) => {
+      if (settledRef.current) return;
+      settledRef.current = true;
+      logOnrampDetail("checkout page did not load", detail);
+      if (__DEV__ && pageUrl?.host === "localhost") {
+        const port = pageUrl.port ?? "80";
+        console.warn(
+          `[onramp] the phone reaches ${pageUrl.origin} only through \`adb reverse tcp:${port} tcp:${port}\`. A LAN IP won't work: the widget refuses a parent that is not https or localhost.`,
+        );
+      }
+      onPageMessageRef.current({ type: "mount_error", reason: "mount_failed" });
+    },
+    [pageUrl],
+  );
+  const failLoadRef = useRef(failLoad);
+  failLoadRef.current = failLoad;
+
+  // One watchdog per page load (a new session remounts the WebView).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: restart per session on purpose
+  useEffect(() => {
+    settledRef.current = false;
+    const timer = setTimeout(
+      () => failLoadRef.current("no ready from the page"),
+      PAGE_READY_TIMEOUT_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [session.sessionId]);
+
+  const onError = useCallback(
+    (event: WebViewErrorEvent) =>
+      failLoad({
+        code: event.nativeEvent.code,
+        description: event.nativeEvent.description,
+      }),
+    [failLoad],
+  );
+  const onHttpError = useCallback(
+    (event: WebViewHttpErrorEvent) =>
+      failLoad({ status: event.nativeEvent.statusCode }),
+    [failLoad],
   );
 
   const onShouldStartLoadWithRequest = useCallback(
@@ -187,6 +197,7 @@ function HostedOnrampPage({
       if (!message) return;
 
       if (message.type === "ready") {
+        settledRef.current = true;
         // The session goes in once, after READY, never in the URL.
         if (sentSessionIdRef.current === session.sessionId) return;
         sentSessionIdRef.current = session.sessionId;
@@ -229,6 +240,8 @@ function HostedOnrampPage({
       originWhitelist={[pageOrigin]}
       onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
       onMessage={onMessage}
+      onError={onError}
+      onHttpError={onHttpError}
       cacheEnabled={false}
       incognito={false}
       style={{ flex: 1 }}

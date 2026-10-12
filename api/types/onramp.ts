@@ -16,6 +16,7 @@ export type TOnrampDisabledReason =
   | "flag_off"
   | "no_api_key"
   | "no_supported_chain"
+  | "no_hosted_page"
   | "no_referrer_domain";
 
 export type TOnrampConfig = {
@@ -24,7 +25,10 @@ export type TOnrampConfig = {
   environment: TOnrampEnvironment;
   /** Widget origin. The page must mount the kit with this exact origin. */
   widgetBaseUrl: string;
-  /** Remote widget host (spec §4.5.1 A2). Null = bundled DOM component. */
+  /**
+   * The checkout page that frames the widget (the `takumipay-onramp`
+   * project, spec §4.5.1 A2). Null only while Buy is disabled.
+   */
   hostedPageUrl: string | null;
   support: TOnrampSupport[];
   /** https hosts the widget may open in the system browser (§7). */

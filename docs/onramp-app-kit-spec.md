@@ -287,6 +287,11 @@ modules into it, and watch the Metro crash line for an entry other than
 **Recommendation:** build Option B first. It makes phase 0 a single file, and
 it only gives way to §4.3 or §4.5 if production rejects the `file://` origin.
 
+> **Superseded 2026-10-10.** Sandbox already rejects it: the widget sends
+> `frame-ancestors https: http://localhost:*` in every environment, so a
+> `file://` or LAN-address parent is refused. Option B was removed; see §13
+> "Hosted page only".
+
 ### 4.5 Origin options and their security (read before choosing for production)
 
 `referrerDomain` becomes a `frame-ancestors` CSP allowlist on the widget
@@ -653,18 +658,25 @@ task, and was not acted on.
 |---|---|
 | API module | `api/src/onramp/` (`onramp.config.ts`, `onramp-kit.client.ts`, `onramp.service.ts`, `onramp.controller.ts`, `onramp-webhook.ts`), `OnrampOrder` model + migration `20261008000000_onramp_order` |
 | Mobile screen | `app/add-funds.tsx`, `components/add-funds/` |
-| Widget hosts | `components/add-funds/onramp/OnrampWidget.dom.tsx` (Option B), `components/add-funds/onramp/OnrampWebView.tsx` (chooses B or A2 from config) |
-| Shared browser core | `services/onramp/embed/mountOnramp.ts` (only the two hosts import it; never RN code) |
+| Widget host (app) | `components/add-funds/onramp/OnrampWebView.tsx`: a hardened WebView on the hosted page |
 | Pure layer + tests | `services/onramp/{messages,destinations,navigation}.ts`, `services/errors/onrampErrors.ts`, `services/onramp/onramp.test.ts` |
-| Hosted page (A2) | `web/onramp-embed/` (own `package.json`, pinned esbuild + SDK, `_headers` CSP, `build.mjs` → `dist/v1/`) |
+| Hosted page (A2) | Separate project `takumipay-onramp` at `../onramp` (own repo, deployed on its own): pinned esbuild + SDK, `_headers` CSP, `build.mjs` → `dist/v1/`, `src/protocol.ts` mirrors `services/onramp/messages.ts` |
 
 ### Decisions taken while building
 
-- **Host choice is server-driven.** `GET /onramp/config` returns
-  `hostedPageUrl`. Null = bundled DOM component; set
-  `ONRAMP_HOSTED_PAGE_URL` and every installed app switches to the hosted
-  page with no release. Both hosts speak one message protocol
-  (`services/onramp/messages.ts`).
+- **Hosted page only (revised 2026-10-10).** Option B (bundled DOM
+  component) cannot work: the widget's CSP is `frame-ancestors https:
+  http://localhost:*`, and the bundled page loads from `file://`
+  (release) or the Metro LAN address (debug). Chromium refuses both
+  ("Framing 'https://onramp-sandbox.arc.io/' violates ... frame-ancestors"),
+  and the kit's 10 s watchdog then reports `PAGE_NOT_LOADED`, which the
+  user saw as an endless spinner then "try again". Option B was removed;
+  the page lives in the `takumipay-onramp` project. The API reports
+  `disabledReason: "no_hosted_page"` until `ONRAMP_HOSTED_PAGE_URL` is set.
+  Sandbox also accepts `http://localhost:<port>` for local dev (the widget
+  allows a localhost parent): `npm run dev` in `../onramp`, then
+  `adb reverse tcp:5180 tcp:5180`. Verified end to end in Chromium
+  against the live sandbox: `ready` → session → `INITIALIZATION_SUCCESS`.
 - **"Wallet owned by the user" = the JWT's own wallet.** One `User` row is
   one wallet here (SIWx), and the app mints with the receiving wallet's
   JWT. The API refuses any other destination or a JWT from another
@@ -705,11 +717,16 @@ task, and was not acted on.
 - **Q12:** session = `{ sessionId, sessionToken, widgetUrl, expiresAt,
   traceId }` (server kit allow-lists its output). Request accepts
   optional `destinationChain`, `amount`, `currency`, `email`, `metadata`;
-  we send none of them yet.
+  we send none of them yet. **Correction (2026-10-10, live sandbox):** the
+  API answers `{ data: { sessionToken, expiresAt } }` only, so the kit's
+  `sessionId` is absent despite its type. The id is the session token's
+  `sessionId` claim; `sessionIdOf()` in `onramp-kit.client.ts` reads it
+  from there. Trusting the type made every mint a 502
+  `ONRAMP_MINT_FAILED`.
 - **Q6 (partly):** the server kit's `referrerDomain` docs name the fiat
   provider as Transak. Its branding will appear inside the widget.
 
-### Known risk for the phase 0 spike
+### Known risk for the phase 0 spike (moot since Option B was removed)
 
 On Android, the WebView message interface is reachable from every frame,
 including the third-party iframe. The app treats all inbound messages as

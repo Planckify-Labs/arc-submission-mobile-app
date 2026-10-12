@@ -84,24 +84,3 @@ export function decideHostedNavigation(args: {
   if (parsed && parsed.origin === pageOrigin.toLowerCase()) return "allow";
   return isAllowedExternalLink(url, externalLinkHosts) ? "external" : "block";
 }
-
-/**
- * Same decision for the bundled DOM component. Its own document loads
- * from `file://` (release) or the Metro dev server (debug only), so the
- * top frame may only be that; everything else is external or blocked.
- */
-export function decideBundledNavigation(args: {
-  url: string;
-  isTopFrame: boolean;
-  isDev: boolean;
-  externalLinkHosts: string[];
-}): TTopFrameDecision {
-  const { url, isTopFrame, isDev, externalLinkHosts } = args;
-  if (url === "about:blank" || url === "about:srcdoc") return "allow";
-  if (!isTopFrame) {
-    return parseHttpUrl(url)?.scheme === "https" ? "allow" : "block";
-  }
-  if (url.startsWith("file://")) return "allow";
-  if (isDev && /^http:\/\/[^/]+\/_expo\/@dom\//.test(url)) return "allow";
-  return isAllowedExternalLink(url, externalLinkHosts) ? "external" : "block";
-}

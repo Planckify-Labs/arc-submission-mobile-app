@@ -34,9 +34,20 @@ export function resolveOnrampDestinations(args: {
   config: TOnrampConfig | null | undefined;
   wallets: TWallet[];
   activeWallet: TWallet | null;
+  /**
+   * Debug builds only: offer Buy while the server is on but checkout
+   * can't run yet (no API key or no hosted page), so the screen can be
+   * previewed. Checkout itself still refuses. Release builds never pass it.
+   */
+  allowPreview?: boolean;
 }): TOnrampDestinations {
   const { config, wallets, activeWallet } = args;
-  if (!config?.enabled || config.support.length === 0) return NONE;
+  if (!config || config.support.length === 0) return NONE;
+  const previewable =
+    args.allowPreview === true &&
+    (config.disabledReason === "no_api_key" ||
+      config.disabledReason === "no_hosted_page");
+  if (!config.enabled && !previewable) return NONE;
 
   const candidates: TOnrampDestination[] = [];
   let preferred: TOnrampDestination | null = null;

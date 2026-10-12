@@ -3,9 +3,10 @@
  *
  * Spec: docs/onramp-app-kit-spec.md §4.3, §7.
  *
- * One protocol for both hosts: the bundled DOM component (§4.4) calls its
- * `onMessage` native action with these objects, and the hosted page
- * (§4.5.1 A2) posts them as JSON through `ReactNativeWebView.postMessage`.
+ * The page is the separate `takumipay-onramp` project (§4.5.1 A2); it
+ * posts these as JSON through `ReactNativeWebView.postMessage`. Its
+ * `src/protocol.ts` mirrors the types here: change both together, and
+ * ship a breaking change as a new page path (`/v2/`).
  *
  * Everything inbound is UNTRUSTED. On Android the WebView's message
  * interface is reachable from every frame, including the third-party
@@ -81,9 +82,8 @@ export type TOnrampPageMessage = z.infer<typeof onrampPageMessageSchema>;
 const MAX_MESSAGE_BYTES = 4096;
 
 /**
- * Parse one inbound message (a JSON string from the hosted page, or the
- * object a DOM-component action received). Returns null for anything that
- * is not exactly one of the four known shapes.
+ * Parse one inbound message (a JSON string from the hosted page). Returns
+ * null for anything that is not exactly one of the four known shapes.
  */
 export function parseOnrampPageMessage(
   raw: unknown,
