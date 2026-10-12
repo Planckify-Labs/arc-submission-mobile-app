@@ -45,6 +45,7 @@ import {
   buildAndSendSolTransfer,
   getSolanaBalance,
 } from "../../chains/solana/transferService.ts";
+import { executePointDepositSolana } from "../../nanopay/pathPointDepositSolana.ts";
 import { solanaConnection, solanaRpcForUrl } from "../../rpc/solanaRpcPool.ts";
 import {
   generateWalletMnemonic,
@@ -109,6 +110,8 @@ export function createSolanaWalletKit(): WalletKitAdapter {
     namespace: SOLANA_NAMESPACE,
     supportsTokenTransfer: true,
     supportsPrivateKeyImport: true,
+    // Anchor `deposit_points` — `services/nanopay/pathPointDepositSolana.ts`.
+    supportsPointDeposit: true,
     displayName: "Solana",
     brandColor: "#9945FF",
     preferredPaymentRail: "solana",
@@ -116,6 +119,9 @@ export function createSolanaWalletKit(): WalletKitAdapter {
     // Deep-link spec §4.5 — Solana Pay transfer builder + WalletConnect
     // `solana` namespace / codec (`docs/deeplink-wallet-interactions-spec.md`).
     buildPaymentRequest: buildSolanaPaymentRequest,
+    executePointDeposit(args) {
+      return executePointDepositSolana(this, args);
+    },
     walletConnectNamespace: solanaWalletConnectNamespace,
     walletConnectCodec: solanaWalletConnectCodec,
     formatConnectChipLabel(payload: unknown): string {

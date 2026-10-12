@@ -59,6 +59,7 @@ import {
   ensureTrustline,
   hasTrustline,
 } from "../../chains/stellar/trustlineService";
+import { executePointDepositStellar } from "../../nanopay/pathPointDepositStellar";
 import { breadcrumb, captureException } from "../../telemetry/stellar";
 import {
   generateWalletMnemonic,
@@ -154,6 +155,14 @@ export function createStellarWalletKit(): WalletKitAdapter {
     // Deep-link spec §4.5 — SEP-0007 `pay` builder + WalletConnect
     // `stellar` namespace / codec.
     buildPaymentRequest: buildStellarPaymentRequest,
+    executePointDeposit({ contractAddress, tokenAddress, ...rest }) {
+      return executePointDepositStellar({
+        ...rest,
+        walletKit: this,
+        contractId: contractAddress,
+        token: tokenAddress,
+      });
+    },
     walletConnectNamespace: stellarWalletConnectNamespace,
     walletConnectCodec: stellarWalletConnectCodec,
 

@@ -20,7 +20,7 @@ export type DepositSupport = "supported" | "unsupported" | "unknown";
 export interface DepositSupportInput {
   /**
    * The chain family has a point-deposit execution path at all
-   * (`chainInfo#supportsPointDeposit`). `false` for Solana / Sui.
+   * (`chainInfo#supportsPointDeposit`). `false` for Sui.
    */
   chainSupportsDeposit: boolean;
   /**

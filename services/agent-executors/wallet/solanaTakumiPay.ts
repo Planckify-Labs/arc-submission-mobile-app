@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { smartContractApi } from "@/api/endpoints/smart-contracts";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import { storage } from "@/lib/storage/mmkv";
-import { deriveConfigPda } from "@/services/chains/solana/takumiPay";
+import { readTakumiPayCounters } from "@/services/chains/solana/takumiPay";
 import { computeRefIdHash } from "@/services/chains/solana/takumiPay/refIdHash";
 import { buildCreateTransactionInstruction } from "@/services/nanopay/solana/buildCreateTransaction";
 import { buildDepositPointsInstruction } from "@/services/nanopay/solana/buildDepositPoints";
@@ -56,7 +56,11 @@ function getSolanaKit() {
 async function resolveTakumiPayProgramId(
   chain: Extract<ChainConfig, { namespace: "solana" }>,
 ): Promise<PublicKey> {
-  const slug = `solana-${chain.cluster}`;
+  // The feed's slug is `solana-mainnet`, not the cluster name `mainnet-beta`.
+  const slug =
+    chain.cluster === "mainnet-beta"
+      ? "solana-mainnet"
+      : `solana-${chain.cluster}`;
   const contracts = await smartContractApi.searchSmartContracts({
     name: "takumi_pay",
     type: "payment",
@@ -73,46 +77,17 @@ async function resolveTakumiPayProgramId(
 }
 
 async function fetchTakumiPayConfig(rpcUrl: string, programId: PublicKey) {
-  const connection = solanaConnection(rpcUrl);
-  const [configPda] = deriveConfigPda(programId);
-  const accountInfo = await connection.getAccountInfo(configPda);
-  if (!accountInfo) {
+  const counters = await readTakumiPayCounters(
+    solanaConnection(rpcUrl),
+    programId,
+  );
+  if (!counters) {
     throw new ExecutorError(
       ExecutorErrorCode.NetworkError,
       "config_account_not_found",
     );
   }
-  // Parse the Config account data (skip 8-byte discriminator)
-  const data = accountInfo.data.subarray(8);
-  // Config layout: owner(32) + pendingOwner(1+32?) + backendSigner(32) + paused(1) + pointDepositsPaused(1) + txCounter(8) + pointDepositCounter(8) + ...
-  // Simplified: read txCounter and pointDepositCounter at known offsets
-  // For a robust implementation, use Anchor deserialization. For now, read the essential fields.
-
-  // The Config struct in order:
-  // owner: Pubkey (32)
-  // pending_owner: Option<Pubkey> (1 + 0 or 32)
-  // backend_signer: Pubkey (32)
-  // paused: bool (1)
-  // point_deposits_paused: bool (1)
-  // tx_counter: u64 (8)
-  // point_deposit_counter: u64 (8)
-  // withdrawal_delay: i64 (8)
-  // withdrawal_nonce: u64 (8)
-  // bump: u8 (1)
-
-  let offset = 0;
-  offset += 32; // owner
-  const hasPendingOwner = data[offset] === 1;
-  offset += 1 + (hasPendingOwner ? 32 : 0); // pending_owner Option
-  offset += 32; // backend_signer
-  offset += 1; // paused
-  offset += 1; // point_deposits_paused
-
-  const txCounter = data.readBigUInt64LE(offset);
-  offset += 8;
-  const pointDepositCounter = data.readBigUInt64LE(offset);
-
-  return { txCounter, pointDepositCounter };
+  return counters;
 }
 
 export const executeBookingSol: MobileToolExecutor = (input, context) =>

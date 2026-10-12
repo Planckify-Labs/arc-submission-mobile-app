@@ -19,7 +19,6 @@ import useRQGlobalState from "@/hooks/useRQGlobalState";
 import { useWallet } from "@/hooks/useWallet";
 import { toChainTag } from "@/services/analytics/chainTag";
 import { track } from "@/services/analytics/posthog";
-import { executePointDepositStellar } from "@/services/nanopay/pathPointDepositStellar";
 import {
   getChainKey,
   matchesBlockchainRow,
@@ -88,23 +87,23 @@ export function useDepositState() {
     getKitForWallet,
   } = useWallet();
 
-  // Deposit flow supports the EVM smart-contract path and the Stellar
-  // Soroban `deposit_points` path. `isEvm` drives the viem approve+deposit
-  // flow; `isStellar` drives the Soroban path (no approval — the SAC transfer
-  // is authorized inline by the tx envelope). Any other namespace has no
-  // deposit path, so downstream queries stay disabled and DepositContent shows
+  // Two deposit paths. EVM runs the viem approve + `depositPoints` flow in
+  // this hook. Every other family that supports deposits goes through its
+  // wallet kit's `executePointDeposit` (Stellar Soroban, Solana Anchor): no
+  // separate approval step, contract resolved by backend blockchainId,
+  // balances read through the kit. Any other namespace has no deposit path,
+  // so downstream queries stay disabled and DepositContent shows
   // `DepositUnsupportedChainModal`.
   //
   // `activeChainId` is the EVM numeric chainId (0 for non-EVM), which
   // short-circuits the EVM-only queries (useSmartContractByChain, viem
   // balances) via React Query's `enabled` flag.
   const isEvm = rawActiveChain.namespace === "eip155";
-  const isStellar = rawActiveChain.namespace === "stellar";
   const activeChainId = isEvm ? rawActiveChain.chain.id : 0;
   // Family-level "is there a deposit path at all" gate. Owned by the wallet
-  // kit (§4.5 space docking) instead of an `isEvm || isStellar` expression
-  // that a new chain has to remember to extend in two files.
+  // kit (§4.5 space docking), never a namespace list here.
   const chainSupportsDeposit = supportsPointDeposit(rawActiveChain);
+  const usesKitDeposit = !isEvm && chainSupportsDeposit;
 
   const { isAuthenticated } = useIsAuthenticated();
   const {
@@ -185,36 +184,34 @@ export function useDepositState() {
   } = useSmartContractByChain(activeChainId);
   const contractAddress = smartContract?.address as `0x${string}` | undefined;
 
-  // Stellar resolves its `takumi_pay` contract by backend blockchainId (no
+  // Kit-path families resolve their `takumi_pay` contract by backend blockchainId (no
   // numeric chainId). `usePaymentContract` is the same resolver the merchant
   // -payment screen uses.
   const {
-    data: stellarContract,
-    isFetching: isStellarContractFetching,
-    isPending: isStellarContractPending,
-    isError: isStellarContractError,
+    data: kitContract,
+    isFetching: isKitContractFetching,
+    isPending: isKitContractPending,
+    isError: isKitContractError,
   } = usePaymentContract({
-    blockchainId: isStellar ? activeBackendChain?.id : undefined,
+    blockchainId: usesKitDeposit ? activeBackendChain?.id : undefined,
   });
-  const stellarContractAddress = isStellar
-    ? (stellarContract?.address as string | undefined)
+  const kitContractAddress = usesKitDeposit
+    ? (kitContract?.address as string | undefined)
     : undefined;
 
-  // Unified deposit target: EVM `0x…` or Stellar `C…`. Drives `hasContract`,
-  // input validation, and the Stellar deposit path. The EVM viem calls keep
+  // Unified deposit target: EVM `0x…`, or the kit family's contract / program
+  // address. Drives `hasContract`, input validation, and the kit deposit path. The EVM viem calls keep
   // using the narrowly-typed `contractAddress` directly.
-  const depositContractAddress: string | undefined = isStellar
-    ? stellarContractAddress
+  const depositContractAddress: string | undefined = usesKitDeposit
+    ? kitContractAddress
     : contractAddress;
   // "The contract lookup hasn't settled yet" — pending (including a query
   // still disabled while `activeBackendChain` resolves), refetching a stale
   // cache, or errored. Every one of those windows used to be indistinguishable
   // from "no contract on this chain", which is what made the unsupported-
   // network sheet fire on chains that were only mid-resolution.
-  const isContractUnresolved = isStellar
-    ? isStellarContractPending ||
-      isStellarContractFetching ||
-      isStellarContractError
+  const isContractUnresolved = usesKitDeposit
+    ? isKitContractPending || isKitContractFetching || isKitContractError
     : isEvmContractPending || isEvmContractFetching || isEvmContractError;
 
   // Single verdict every deposit surface reads, so the screen never has to
@@ -316,7 +313,7 @@ export function useDepositState() {
     queryFn: async () => {
       if (!activeWallet.address) return BigInt(0);
       // Non-EVM chains read balances through the kit adapter, not viem.
-      if (isStellar) {
+      if (usesKitDeposit) {
         const kit = getKitForWallet(activeWallet);
         return (
           (await kit.getNativeBalance?.(
@@ -346,7 +343,7 @@ export function useDepositState() {
       ],
       queryFn: async () => {
         if (!activeWallet.address || !selectedToken) return BigInt(0);
-        if (isStellar) {
+        if (usesKitDeposit) {
           if (!selectedToken.contractAddress) return BigInt(0);
           const kit = getKitForWallet(activeWallet);
           return (
@@ -370,11 +367,28 @@ export function useDepositState() {
       refetchInterval: 30_000,
     });
 
-  // Native decimals: EVM = 18, Stellar (XLM) = 7 stroops (spec §3.8).
-  const nativeBalanceFormatted = useMemo(
-    () => parseFloat(formatUnits(nativeBalance, isStellar ? 7 : 18)).toFixed(6),
-    [nativeBalance, isStellar],
-  );
+  // EVM natives have 18 decimals; kit families format their own native
+  // unit (XLM 7, SOL 9).
+  const nativeBalanceFormatted = useMemo(() => {
+    if (!usesKitDeposit) {
+      return parseFloat(formatUnits(nativeBalance, 18)).toFixed(6);
+    }
+    try {
+      const human = getKitForWallet(activeWallet)
+        .formatNativeAmount(nativeBalance, rawActiveChain)
+        .split(" ")[0];
+      return parseFloat(human).toFixed(6);
+    } catch {
+      // Wallet and chain briefly out of step during a switch.
+      return "0.000000";
+    }
+  }, [
+    nativeBalance,
+    usesKitDeposit,
+    getKitForWallet,
+    activeWallet,
+    rawActiveChain,
+  ]);
 
   const tokenBalanceFormatted = useMemo(() => {
     if (!selectedToken) return "0";
@@ -426,9 +440,10 @@ export function useDepositState() {
     needsApproval: boolean;
   }> => {
     if (!validateInputs()) return { ok: false, needsApproval: false };
-    // Stellar: no ERC-20-style allowance. The Soroban SAC transfer is
-    // authorized inline by the deposit tx envelope, so go straight to confirm.
-    if (isStellar) return { ok: true, needsApproval: false };
+    // Kit families: no separate allowance step. Stellar's SAC transfer is
+    // authorized by the tx envelope; Solana's approve/revoke ride in the same
+    // transaction as the deposit. Go straight to confirm.
+    if (usesKitDeposit) return { ok: true, needsApproval: false };
     if (!selectedToken || !tokenAmountNeeded || !contractAddress) {
       return { ok: false, needsApproval: false };
     }
@@ -471,7 +486,7 @@ export function useDepositState() {
     }
   }, [
     validateInputs,
-    isStellar,
+    usesKitDeposit,
     selectedToken,
     tokenAmountNeeded,
     contractAddress,
@@ -504,14 +519,14 @@ export function useDepositState() {
       if (!validateInputs()) return;
       if (!selectedToken || !tokenAmountNeeded || !activeBackendChain) return;
 
-      // ── Stellar path: Soroban `deposit_points` (no ERC-20 approval) ──
-      // The SAC transfer is authorized inline by the deposit tx envelope, so
-      // there is no allowance/approve step. The orchestrator builds, signs,
-      // submits, and confirms the invocation via the kit.
-      if (isStellar) {
+      // ── Kit path: the family's own `deposit_points` (no approval step) ──
+      // The kit builds, signs, submits and confirms the deposit; this hook
+      // only hands the resulting hash to the API, as on EVM.
+      const kit = usesKitDeposit ? getKitForWallet(activeWallet) : null;
+      if (kit) {
         const refId = `pt_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
         try {
-          // Register the depositing G-address against the account so the
+          // Register the depositing address against the account so the
           // backend's ownership check accepts it as the payer (idempotent).
           updateState({
             isLoading: true,
@@ -524,13 +539,14 @@ export function useDepositState() {
             isLoading: true,
             transactionStatus: "Depositing to contract...",
           });
-          const kit = getKitForWallet(activeWallet);
-          const { txHash } = await executePointDepositStellar({
+          if (!kit.executePointDeposit) {
+            throw new Error("point deposit not supported by this wallet kit");
+          }
+          const { txHash } = await kit.executePointDeposit({
             wallet: activeWallet,
-            walletKit: kit,
             chain: rawActiveChain,
-            contractId: depositContractAddress,
-            token: selectedToken.contractAddress!,
+            contractAddress: depositContractAddress,
+            tokenAddress: selectedToken.contractAddress!,
             refId,
             amount: tokenAmountNeeded.raw,
           });
@@ -559,7 +575,7 @@ export function useDepositState() {
           updateState({ isLoading: false, transactionStatus: "" });
           announceDepositSent();
         } catch (error: any) {
-          console.error("Stellar deposit error:", error);
+          if (__DEV__) console.warn("Kit deposit error:", error);
           let errorMessage = "Deposit failed. Please try again.";
           try {
             const body = await error?.response?.json?.();
@@ -585,7 +601,7 @@ export function useDepositState() {
       const publicClient = getPublicClientForActiveChain();
       // Both accessors now return `null` on non-EVM chains (§7.5).
       // The EVM viem approve+deposit flow below requires the `0x…`
-      // `contractAddress`; the Stellar path returned above.
+      // `contractAddress`; the kit path returned above.
       if (
         !walletClient ||
         !walletClient.account ||
@@ -741,7 +757,7 @@ export function useDepositState() {
     },
     [
       validateInputs,
-      isStellar,
+      usesKitDeposit,
       selectedToken,
       contractAddress,
       depositContractAddress,

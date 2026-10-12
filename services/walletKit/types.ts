@@ -571,6 +571,20 @@ export interface EstablishTrustlineResult {
   hash?: string;
 }
 
+/** Arguments for `WalletKitAdapter.executePointDeposit`. */
+export interface PointDepositArgs {
+  wallet: TWallet;
+  chain: ChainConfig;
+  /** The chain's `takumi_pay` contract / program address, from the API. */
+  contractAddress: string;
+  /** The deposit token's address from its Token row (mint, SAC id, …). */
+  tokenAddress: string;
+  /** Client-generated reference the API verifies the deposit by. */
+  refId: string;
+  /** Raw amount in the token's smallest unit. */
+  amount: bigint;
+}
+
 /**
  * Arguments for `WalletKitAdapter.sendAnchorInstruction` — broadcasts a
  * Solana transaction containing Anchor program instructions. Used by the
@@ -1542,7 +1556,8 @@ export interface WalletKitAdapter {
   /**
    * Whether the app has a point-deposit ("Add Points") execution path for
    * this chain family — EVM's `depositPoints` contract call and Stellar's
-   * Soroban `deposit_points` invocation set it; Solana / Sui omit it.
+   * Soroban `deposit_points` invocation and Solana's Anchor `deposit_points`
+   * set it; Sui omits it.
    *
    * This is the *family* gate only. A specific network is still unavailable
    * when the backend has no `/blockchains` row or no `takumi_pay` contract
@@ -1551,6 +1566,16 @@ export interface WalletKitAdapter {
    * deposit screen never tests namespaces to decide what to offer.
    */
   supportsPointDeposit?: boolean;
+  /**
+   * Executes an "Add Points" deposit into the chain's `takumi_pay` contract
+   * and returns the transaction hash the API verifies against `refId`.
+   * Implemented by kits whose deposit needs no ERC-20 approval step (Stellar,
+   * Solana); EVM keeps its viem approve + deposit path in the hook. Presence
+   * is the dock: the deposit screen calls it when defined and never tests the
+   * namespace. A kit that sets `supportsPointDeposit` on a non-EVM family must
+   * implement it.
+   */
+  executePointDeposit?(args: PointDepositArgs): Promise<{ txHash: string }>;
   /** `true` by default; future MPC / HW-only chains return `false`. */
   supportsPrivateKeyImport?: boolean;
   /** Human-readable chain family label for UI pickers. */

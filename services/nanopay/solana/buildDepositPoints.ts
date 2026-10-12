@@ -15,7 +15,7 @@ import {
   deriveConfigPda,
   derivePointDepositPda,
   derivePointRefRecordPda,
-} from "@/services/chains/solana/takumiPay";
+} from "@/services/chains/solana/takumiPay/pda";
 import { computeRefIdHash } from "@/services/chains/solana/takumiPay/refIdHash";
 
 // deposit_points discriminator from IDL

@@ -1,3 +1,4 @@
+export * from "./config";
 export * from "./errors";
 export { TAKUMI_PAY_IDL } from "./idl";
 export * from "./pda";
