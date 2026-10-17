@@ -216,6 +216,8 @@ describe("route copy", () => {
   it("maps reasons to fixed copy, never raw codes or em-dashes", () => {
     const reasons = [
       "quote_stale",
+      "quote_expired",
+      "floor_not_met",
       "price_impact_too_high",
       "insufficient_balance",
       "route_simulation_failed",
@@ -229,17 +231,28 @@ describe("route copy", () => {
     }
     expect(routeErrorCopy(undefined, undefined)).toMatch(/nothing was sent/);
     expect(isRequoteReason("quote_stale")).toBe(true);
+    expect(isRequoteReason("quote_expired")).toBe(true);
+    expect(isRequoteReason("floor_not_met")).toBe(true);
     expect(isRequoteReason("insufficient_balance")).toBe(false);
   });
 });
 
 describe("balance source", () => {
   it("reads Arc's ERC-20 USDC from the contract even when flagged native", () => {
-    const arcUsdc = token("eip155:5042002", "0x3600000000000000000000000000000000000000", "USDC", { isNative: true });
+    const arcUsdc = token(
+      "eip155:5042002",
+      "0x3600000000000000000000000000000000000000",
+      "USDC",
+      { isNative: true },
+    );
     expect(readsAsContract(arcUsdc)).toBe(true);
   });
   it("reads a real native coin from the chain", () => {
-    const eth = { ...token(BASE, "", "ETH"), caip19: `${BASE}/slip44:60`, isNative: true };
+    const eth = {
+      ...token(BASE, "", "ETH"),
+      caip19: `${BASE}/slip44:60`,
+      isNative: true,
+    };
     expect(readsAsContract(eth)).toBe(false);
   });
 });

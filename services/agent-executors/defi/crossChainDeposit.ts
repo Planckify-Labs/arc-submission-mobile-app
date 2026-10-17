@@ -460,7 +460,7 @@ function resolveDestinationAsset(
 function classifyCrossChainError(err: unknown): string {
   if (err instanceof DefiError) return err.code;
   const code = (err as { code?: string } | null)?.code;
-  if (code === "quote_stale") return "stale_precondition";
+  if (code === "quote_expired") return "stale_precondition";
   if (code === "unsupported_chain") return "unsupported_chain";
   if (code === "wallet_cannot_execute") return "wallet_cannot_execute";
   if (code === "insufficient_funds") return "insufficient_funds";

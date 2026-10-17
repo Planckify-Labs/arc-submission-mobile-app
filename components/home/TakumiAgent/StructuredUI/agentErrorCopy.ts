@@ -63,7 +63,11 @@ const COPY: Record<string, string> = {
   intent_no_longer_safe:
     "The on-chain situation moved since I prepared this. Let me re-check and offer a safer plan.",
   quote_stale:
-    "The price moved while preparing this. Let me get a fresh quote.",
+    "This route changed while preparing it. Let me get a fresh quote.",
+  quote_expired:
+    "That quote expired before it was signed. Let me get a fresh one.",
+  floor_not_met:
+    "The price dropped below the minimum you approved, so I didn't sign it. Let me get a fresh quote.",
   // swap / route safety reasons
   price_impact_too_high:
     "This swap would move the price a lot. Review the price impact on the card and confirm it there, or try a smaller amount.",

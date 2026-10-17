@@ -279,6 +279,12 @@ export interface TBridgeQuote {
   execution: TBridgeExecutionPayload;
   issuedAt: string;
   expiresAt: string;
+  /**
+   * Opaque, backend-signed floor on a swap card quote. Kept on the device
+   * (`services/bridgeRoutes/floorTokens.ts`) for the signing re-quote, never
+   * shown to the model.
+   */
+  floorToken?: string;
 }
 
 /**
@@ -362,6 +368,14 @@ export interface TBridgeQuoteRequest {
    * so the backend can hold the route to it (slippage only ever tightened).
    */
   minReceiveRaw?: string;
+  /**
+   * Which of a route's two quotes this is: `quote` for the card the user
+   * approves, `execute` for the re-quote right before signing. The backend
+   * holds only an `execute` swap quote to the approved floor.
+   */
+  purpose?: "quote" | "execute";
+  /** The card quote's `floorToken`, sent back by the `execute` re-quote. */
+  floorToken?: string;
   transferSpeedHint?: "fast" | "standard";
   useForwarder?: boolean;
 }

@@ -426,6 +426,7 @@ function useDestinationRequote(base: RoutableQuote | null) {
           amountRaw,
           fromAddress,
           toAddress,
+          purpose: "quote",
         });
         // Switching twice in quick succession leaves the FIRST re-quote in
         // flight. Whichever request resolves last would otherwise win the

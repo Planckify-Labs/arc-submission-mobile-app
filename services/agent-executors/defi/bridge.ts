@@ -31,6 +31,7 @@ import type {
 } from "@/api/types/bridge";
 import type { TWallet } from "@/constants/types/walletTypes";
 import { buildChainConfigFromBlockchain } from "@/hooks/useWallet.helpers";
+import { track } from "@/services/analytics/posthog";
 import {
   assetContractFromCaip19,
   findChainByCaip2,
@@ -43,6 +44,7 @@ import {
   isQuoteExpired,
   resolveSourceChain,
 } from "@/services/bridgeRoutes/execute";
+import { floorTokens } from "@/services/bridgeRoutes/floorTokens";
 import { quoteBindingMismatch } from "@/services/bridgeRoutes/quoteBinding";
 import { buildBridgeQuotePayload } from "@/services/bridgeRoutes/quotePayload";
 import { adapterForQuote } from "@/services/bridgeRoutes/registry";
@@ -410,6 +412,7 @@ export const bridgeQuote: MobileToolExecutor = (input, context) =>
         amountRaw,
         fromAddress: context.wallet.address,
         toAddress,
+        purpose: "quote",
       });
     } catch (err) {
       if (__DEV__) {
@@ -419,6 +422,21 @@ export const bridgeQuote: MobileToolExecutor = (input, context) =>
     }
 
     if (!result.routable) return noRoutePayload(result);
+
+    // Kept for this card's signing re-quote; the model never carries it.
+    if (result.quote.floorToken) {
+      floorTokens.record(
+        {
+          chain: fromChain,
+          wallet: context.wallet.address,
+          fromAsset,
+          toAsset,
+          amountRaw,
+          minReceiveRaw: result.quote.toAmountMinRaw,
+        },
+        result.quote.floorToken,
+      );
+    }
 
     // A swap has no destination-readiness step (swap spec §4.1): the funds
     // land in the signing wallet, which is already paying the fees, and a
@@ -539,6 +557,32 @@ export const bridgeExecute: MobileToolExecutor = (input, context) =>
       throw new ExecutorError(ExecutorErrorCode.WalletCannotExecute);
     }
 
+    // The card's signed floor, when this is the swap it was issued for.
+    const floorSwap = minReceiveRaw
+      ? {
+          chain: fromChain,
+          wallet: context.wallet.address,
+          fromAsset,
+          toAsset,
+          amountRaw,
+          minReceiveRaw,
+        }
+      : null;
+    const floorToken =
+      sameChain && floorSwap ? floorTokens.get(floorSwap) : undefined;
+    const refused = (
+      reason: "floor_not_met" | "quote_expired" | "quote_stale",
+      extra: { provider?: string; shortfall_bps?: number } = {},
+    ) => {
+      track("route_requote_refused", {
+        kind: sameChain ? "swap" : "bridge",
+        reason,
+        chain: fromChain,
+        ...extra,
+      });
+      return new ExecutorError(ExecutorErrorCode.StalePrecondition, reason);
+    };
+
     // Both trust anchors enforce §4.7: a stale or compromised backend
     // cannot get this device to sign toward a chain it does not know.
     if (!routeChainsEnabled(context, fromChain, toChain)) {
@@ -574,6 +618,10 @@ export const bridgeExecute: MobileToolExecutor = (input, context) =>
         // above it. The backend tightens slippage to hold it (never widens);
         // the check below still enforces it either way.
         ...(minReceiveRaw ? { minReceiveRaw } : {}),
+        // Marks this as the signing quote, the only one the backend
+        // tightens, and hands back the card's signed floor to hold.
+        purpose: "execute",
+        ...(floorToken ? { floorToken } : {}),
       });
     } catch (err) {
       if (__DEV__) {
@@ -593,10 +641,7 @@ export const bridgeExecute: MobileToolExecutor = (input, context) =>
       // The route existed when quoted and does not now. That is the
       // world moving between prepare and execute, which is exactly the
       // `stale_precondition` recovery class: re-quote, do not retry.
-      throw new ExecutorError(
-        ExecutorErrorCode.StalePrecondition,
-        "quote_stale",
-      );
+      throw refused("quote_stale");
     }
 
     const quote = result.quote;
@@ -609,10 +654,7 @@ export const bridgeExecute: MobileToolExecutor = (input, context) =>
           diffMs: Date.now() - new Date(quote.expiresAt).getTime(),
         });
       }
-      throw new ExecutorError(
-        ExecutorErrorCode.StalePrecondition,
-        "quote_stale",
-      );
+      throw refused("quote_expired", { provider: quote.provider });
     }
 
     // The fresh quote must be the route the user approved: same chains,
@@ -673,10 +715,15 @@ export const bridgeExecute: MobileToolExecutor = (input, context) =>
               },
             );
           }
-          throw new ExecutorError(
-            ExecutorErrorCode.StalePrecondition,
-            "quote_stale",
-          );
+          // The price moved below what the user approved. Not an expiry:
+          // the copy and the analytics say which one it was.
+          throw refused("floor_not_met", {
+            provider: quote.provider,
+            shortfall_bps:
+              minReceive > 0n
+                ? Number(((minReceive - actualMin) * 10_000n) / minReceive)
+                : undefined,
+          });
         } else if (actualMin < minReceive && __DEV__) {
           console.log(
             "[bridge/execute] dynamic forwarder fee shifted slightly within tolerance",
@@ -964,11 +1011,8 @@ export const bridgeExecute: MobileToolExecutor = (input, context) =>
         );
       }
       const code = (err as { code?: string } | null)?.code;
-      if (code === "quote_stale") {
-        throw new ExecutorError(
-          ExecutorErrorCode.StalePrecondition,
-          "quote_stale",
-        );
+      if (code === "quote_expired") {
+        throw refused("quote_expired", { provider: quote.provider });
       }
       if (code === "unsupported_chain") {
         throw new ExecutorError(ExecutorErrorCode.UnsupportedChain);
@@ -992,6 +1036,9 @@ export const bridgeExecute: MobileToolExecutor = (input, context) =>
       }
       throw new ExecutorError(ExecutorErrorCode.NetworkError);
     }
+
+    // The card's floor has been spent on this submission.
+    if (floorSwap) floorTokens.clear(floorSwap);
 
     // Submitted — the pick has served its bridge, so retire the interlock.
     // Leaving it set would measure a LATER bridge to this chain against a

@@ -16,6 +16,20 @@ export type AnalyticsEventProps = {
     product_category?: string;
     points_spent?: number;
   };
+  /**
+   * The signing re-quote refused a route the user had approved. `reason`:
+   * `floor_not_met` (the fresh guaranteed minimum fell below the approved
+   * one, `shortfall_bps` below it), `quote_expired` (past its TTL) or
+   * `quote_stale` (the route is gone). Invisible in backend logs otherwise:
+   * the agent only paraphrases it. No wallet address, no amounts.
+   */
+  route_requote_refused: {
+    kind: string;
+    reason: string;
+    chain: string;
+    provider?: string;
+    shortfall_bps?: number;
+  };
   swap_completed: {
     chain: string;
     from_asset?: string;

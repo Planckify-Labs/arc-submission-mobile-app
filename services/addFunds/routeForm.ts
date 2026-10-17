@@ -178,7 +178,11 @@ export function hasBlockingBlocker(data: unknown): boolean {
 /** Fixed copy for a refused or failed route, in the app's voice. */
 const ROUTE_COPY: Record<string, string> = {
   quote_stale:
-    "The price moved. We've refreshed the quote, please review it again.",
+    "This route changed before it could be sent. We've refreshed the quote, please review it again.",
+  quote_expired:
+    "This quote expired before it was signed. We've refreshed it, please review it again.",
+  floor_not_met:
+    "The price dropped below the minimum you approved, so nothing was sent. We've refreshed the quote, please review it again.",
   price_impact_too_high:
     "This swap moves the price a lot. Confirm the price impact on the quote, or try a smaller amount.",
   asset_symbol_mismatch:
@@ -228,6 +232,8 @@ export function routeErrorCopy(
 export function isRequoteReason(reason: string | undefined): boolean {
   return (
     reason === "quote_stale" ||
+    reason === "quote_expired" ||
+    reason === "floor_not_met" ||
     reason === "bridge_payload_mismatch" ||
     reason === "quote_floor_invalid"
   );

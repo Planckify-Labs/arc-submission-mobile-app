@@ -21,9 +21,13 @@ const getQuote = vi.fn();
 const adapterExecute = vi.fn();
 const simulate = vi.fn();
 const runPipeline = vi.fn();
+const track = vi.fn();
 
 vi.mock("@/api/endpoints/bridge", () => ({
   bridgeApi: { getQuote: (...a: unknown[]) => getQuote(...a) },
+}));
+vi.mock("@/services/analytics/posthog", () => ({
+  track: (...a: unknown[]) => track(...a),
 }));
 vi.mock("@/hooks/useWallet.helpers", () => ({
   buildChainConfigFromBlockchain: () => ({
@@ -72,6 +76,7 @@ vi.mock("@/services/walletPresence", () => ({
   getWalletForNamespace: () => null,
 }));
 
+import { floorTokens } from "@/services/bridgeRoutes/floorTokens";
 import { resetInFlightSubmissions } from "@/services/defi/safety/checks/layer4-execution";
 import { routeAck, routeAckKey } from "@/services/swap/routeAck";
 import { swapExecute } from "./swap";
@@ -152,6 +157,7 @@ describe("swap_execute through bridge_execute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     routeAck.__resetForTests();
+    floorTokens.__resetForTests();
     resetInFlightSubmissions();
     getQuote.mockResolvedValue({ routable: true, quote: freshQuote() });
     runPipeline.mockResolvedValue({ ok: true, ran: [] });
@@ -306,6 +312,68 @@ describe("swap_execute through bridge_execute", () => {
     // The approved minimum rides on the signing-time re-quote, so a tick
     // in the market is absorbed by tighter slippage instead of a refusal.
     expect(req.minReceiveRaw).toMatch(/^\d+$/);
+  });
+
+  it("marks the signing quote and hands back the card's signed floor", async () => {
+    floorTokens.record(
+      {
+        chain: CHAIN,
+        wallet: ME,
+        // As the backend spelled them on the card: checksummed.
+        fromAsset: `${CHAIN}/erc20:${USDC}`,
+        toAsset: `${CHAIN}/erc20:${WETH}`,
+        amountRaw: "1000000",
+        minReceiveRaw: "398000000000000",
+      },
+      "v1.card.token",
+    );
+    await run();
+    expect(getQuote.mock.calls[0][0]).toMatchObject({
+      purpose: "execute",
+      floorToken: "v1.card.token",
+    });
+  });
+
+  it("sends no token for a card with a different floor", async () => {
+    floorTokens.record(
+      {
+        chain: CHAIN,
+        wallet: ME,
+        fromAsset: input.from_asset,
+        toAsset: input.to_asset,
+        amountRaw: "1000000",
+        minReceiveRaw: "397000000000000",
+      },
+      "v1.other.card",
+    );
+    await run();
+    const req = getQuote.mock.calls[0][0] as { floorToken?: string };
+    expect(req.floorToken).toBeUndefined();
+  });
+
+  it("says floor_not_met, not quote_stale, when the price fell below the approved floor", async () => {
+    getQuote.mockResolvedValue({
+      routable: true,
+      quote: freshQuote({ toAmountMinRaw: "397000000000000" }),
+    });
+    const r = await run();
+    expect(r.error).toBe("stale_precondition");
+    expect(r.reason).toBe("floor_not_met");
+    expect(track).toHaveBeenCalledWith(
+      "route_requote_refused",
+      expect.objectContaining({
+        kind: "swap",
+        reason: "floor_not_met",
+        shortfall_bps: 25,
+      }),
+    );
+    expect(adapterExecute).not.toHaveBeenCalled();
+  });
+
+  it("says quote_expired when the adapter finds the quote past its TTL", async () => {
+    adapterExecute.mockRejectedValue({ code: "quote_expired" });
+    const r = await run();
+    expect(r.reason).toBe("quote_expired");
   });
 
   it("never lets the model name a swap recipient", async () => {

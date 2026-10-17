@@ -89,7 +89,7 @@ function makeCircleBridgeAdapter(cfg: {
             diffMs: Date.now() - new Date(q.expiresAt).getTime(),
           });
         }
-        throw new BridgeExecutionError("quote_stale");
+        throw new BridgeExecutionError("quote_expired");
       }
 
       let payload: ReturnType<typeof verifyCirclePayload>;

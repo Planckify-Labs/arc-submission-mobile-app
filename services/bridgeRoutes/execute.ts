@@ -32,8 +32,10 @@ import type {
  */
 export class BridgeExecutionError extends Error {
   readonly name = "BridgeExecutionError";
+  // `quote_expired`: past its TTL (§8.2). A price move below the approved
+  // floor is `floor_not_met`, decided by the executor, not here.
   readonly code:
-    | "quote_stale"
+    | "quote_expired"
     | "unsupported_chain"
     | "wallet_cannot_execute"
     | "submission_failed"
@@ -82,7 +84,7 @@ export async function executeBridgeQuote(
         diffMs: Date.now() - new Date(quote.expiresAt).getTime(),
       });
     }
-    throw new BridgeExecutionError("quote_stale");
+    throw new BridgeExecutionError("quote_expired");
   }
 
   const kit = walletKitRegistry.has(ctx.chain.namespace)
