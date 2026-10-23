@@ -1,12 +1,6 @@
-import {
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { pointsApi } from "@/api/endpoints/points";
 import type {
-  TPointDepositRequest,
   TPointHistoryParams,
   TPointPriceParams,
 } from "@/api/types/points";
@@ -41,18 +35,6 @@ export const usePointBalance = () => {
     // load async, but the query doesn't wait).
     enabled: isAuthenticated === true && !isAuthLoading,
     retry: false,
-  });
-};
-
-// --- Submit Deposit (authenticated) ---
-export const useSubmitPointDeposit = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: TPointDepositRequest) => pointsApi.submitDeposit(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: pointsQueryKeys.balance() });
-      queryClient.invalidateQueries({ queryKey: pointsQueryKeys.history() });
-    },
   });
 };
 

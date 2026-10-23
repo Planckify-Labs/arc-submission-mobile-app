@@ -51,6 +51,7 @@ import { INBOX_ROUTE } from "@/services/deeplinks/intake";
 import { bootDefi } from "@/services/defi/bootstrap";
 import { bootGasAbstraction } from "@/services/gasAbstraction/boot";
 import { initNotificationHandlers } from "@/services/notifications/handlers";
+import { usePointDepositOutboxFlush } from "@/services/points/usePointDepositOutboxFlush";
 import { bootPpobCategorizers } from "@/services/ppob";
 import {
   registerForPushNotifications,
@@ -236,6 +237,7 @@ function AppShell() {
   usePushNotificationHandler();
   usePushRegistrationRetry();
   useTransferRecordOutboxFlush();
+  usePointDepositOutboxFlush();
   useAppSessionTracking(locked);
   useAgentBackgroundKeepAlive();
   // Swaps and bridges from Add funds keep their status after a restart.

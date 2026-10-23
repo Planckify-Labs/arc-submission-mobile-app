@@ -53,6 +53,7 @@ import { smartContractApi } from "@/api/endpoints/smart-contracts";
 import type { TProductInputField } from "@/api/types/product";
 import AbiTakumiPay from "@/contracts/abis/AbiTakumiPay";
 import { toCatalogDisplayProducts } from "@/services/catalog/catalogDisplay";
+import { recordPointDeposit } from "@/services/points/pointDepositOutbox";
 import { requireWalletClient, resolveChainClients } from "../chainRouter";
 import { checkPointsAuth } from "../pointsAuth";
 import {
@@ -656,7 +657,8 @@ async function pollRedemptionForVoucher(redemptionId: string) {
  *   3. Look up the deposit contract for this chain.
  *   4. Check ERC20 allowance and approve if needed.
  *   5. Call `depositPoints(token, refId, amount)` on the deposit contract.
- *   6. Submit the deposit registration to `pointsApi.submitDeposit`.
+ *   6. Register the deposit through the point-deposit outbox (it POSTs
+ *      `pointsApi.submitDeposit` and keeps retrying if that fails).
  *   7. Poll `pointsApi.getDepositStatus` until terminal state.
  *   8. Return the final `{ deposit_id, status, points_received, tx_hash }`.
  *
@@ -840,28 +842,33 @@ export const depositPoints: MobileToolExecutor = (input, context) =>
       };
     }
 
-    // 6. Register the deposit with the backend API.
-    let depositResp;
-    try {
-      depositResp = await pointsApi.submitDeposit({
-        refId,
-        txHash,
-        tokenId: token.id,
-        blockchainId: blockchain.id,
-        contractAddress,
-        walletAddress: context.wallet.address,
-        tokenAmount: amountWei.toString(),
-        expectedPoints: computedExpectedPoints,
-        currency: "IDR",
-      });
-    } catch (err) {
-      // The on-chain tx already succeeded — return the hash so the
-      // agent can tell the user "your funds moved but the deposit
-      // didn't register, contact support with this hash".
+    // 6. Register the deposit with the backend API, through the same
+    // outbox the deposit screen uses. The funds already moved, so a POST
+    // that fails is queued and retried on the next foreground / sign-in
+    // rather than reported as a failed deposit (which used to send the
+    // user to support, or to deposit again).
+    const depositResp = await recordPointDeposit({
+      refId,
+      txHash,
+      tokenId: token.id,
+      blockchainId: blockchain.id,
+      contractAddress,
+      walletAddress: context.wallet.address,
+      tokenAmount: amountWei.toString(),
+      expectedPoints: computedExpectedPoints,
+      currency: "IDR",
+    });
+    if (!depositResp) {
       return {
-        status: "failed",
+        status: "success",
         tx_hash: txHash,
-        error: classifyPointsError(err),
+        tx_confirmed: true,
+        data: sanitizeApiResponse({
+          status: "PENDING",
+          points_received: "0",
+          tx_hash: txHash,
+          registration: "queued",
+        }),
       };
     }
 

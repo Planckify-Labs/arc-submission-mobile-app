@@ -3,22 +3,20 @@ import { router } from "expo-router";
 import { useCallback, useEffect, useMemo } from "react";
 import { Alert } from "react-native";
 import { erc20Abi, formatUnits, maxUint256, parseUnits } from "viem";
-import { authApi } from "@/api/endpoints/auth";
+import type { TPointDepositRequest } from "@/api/types/points";
 import type { TToken } from "@/api/types/token";
 import { useTakumiWalletContract } from "@/contracts/hooks/useTakumiWalletContract";
 import { useIsAuthenticated } from "@/hooks/queries/useAuth";
 import { useBlockchains } from "@/hooks/queries/useBlockchains";
 import { usePaymentContract } from "@/hooks/queries/usePaymentContract";
-import {
-  usePointPrice,
-  useSubmitPointDeposit,
-} from "@/hooks/queries/usePoints";
+import { usePointPrice } from "@/hooks/queries/usePoints";
 import { useSmartContractByChain } from "@/hooks/queries/useSmartContracts";
 import { useTokens } from "@/hooks/queries/useTokens";
 import useRQGlobalState from "@/hooks/useRQGlobalState";
 import { useWallet } from "@/hooks/useWallet";
 import { toChainTag } from "@/services/analytics/chainTag";
 import { track } from "@/services/analytics/posthog";
+import { recordPointDeposit } from "@/services/points/pointDepositOutbox";
 import {
   getChainKey,
   matchesBlockchainRow,
@@ -235,8 +233,6 @@ export function useDepositState() {
   const { depositPoints } = useTakumiWalletContract({
     contractAddress: contractAddress ?? "0x0",
   });
-
-  const submitDeposit = useSubmitPointDeposit();
 
   useEffect(() => {
     if (stablecoinTokens && stablecoinTokens.length > 0) {
@@ -519,61 +515,52 @@ export function useDepositState() {
       if (!validateInputs()) return;
       if (!selectedToken || !tokenAmountNeeded || !activeBackendChain) return;
 
+      // Once the chain has the deposit it can only be "sent", never
+      // "failed": the outbox registers it with the API and keeps retrying
+      // until it lands. The old one-shot POST turned any API hiccup after a
+      // successful deposit into "Deposit failed. Please try again." — and the
+      // retry paid a second time under a new refId.
+      const sendForCrediting = async (deposit: TPointDepositRequest) => {
+        updateState({
+          isLoading: true,
+          transactionStatus: "Sending your deposit...",
+        });
+        await recordPointDeposit(deposit);
+        track("deposit_completed", {
+          chain: toChainTag(rawActiveChain.namespace),
+          amount: Number(amount),
+        });
+        updateState({ isLoading: false, transactionStatus: "" });
+        announceDepositSent();
+      };
+
       // ── Kit path: the family's own `deposit_points` (no approval step) ──
       // The kit builds, signs, submits and confirms the deposit; this hook
       // only hands the resulting hash to the API, as on EVM.
       const kit = usesKitDeposit ? getKitForWallet(activeWallet) : null;
       if (kit) {
         const refId = `pt_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+        let txHash: string | undefined;
         try {
-          // Register the depositing address against the account so the
-          // backend's ownership check accepts it as the payer (idempotent).
-          updateState({
-            isLoading: true,
-            transactionStatus: "Preparing wallet...",
-            error: undefined,
-          });
-          await authApi.linkWalletAddress(activeWallet.address);
-
+          // No wallet-linking step: the payer is the active wallet, which is
+          // also the session the API authenticates — that is the ownership
+          // proof the server checks.
           updateState({
             isLoading: true,
             transactionStatus: "Depositing to contract...",
+            error: undefined,
           });
           if (!kit.executePointDeposit) {
             throw new Error("point deposit not supported by this wallet kit");
           }
-          const { txHash } = await kit.executePointDeposit({
+          ({ txHash } = await kit.executePointDeposit({
             wallet: activeWallet,
             chain: rawActiveChain,
             contractAddress: depositContractAddress,
             tokenAddress: selectedToken.contractAddress!,
             refId,
             amount: tokenAmountNeeded.raw,
-          });
-
-          updateState({
-            isLoading: true,
-            transactionStatus: "Submitting for verification...",
-          });
-          await submitDeposit.mutateAsync({
-            refId,
-            txHash,
-            tokenId: selectedToken.id,
-            blockchainId: activeBackendChain.id,
-            contractAddress: depositContractAddress,
-            walletAddress: activeWallet.address,
-            tokenAmount: tokenAmountNeeded.raw.toString(),
-            expectedPoints: amount,
-            currency: DEFAULT_CURRENCY,
-          });
-
-          track("deposit_completed", {
-            chain: toChainTag(rawActiveChain.namespace),
-            amount: Number(amount),
-          });
-
-          updateState({ isLoading: false, transactionStatus: "" });
-          announceDepositSent();
+          }));
         } catch (error: any) {
           if (__DEV__) console.warn("Kit deposit error:", error);
           let errorMessage = "Deposit failed. Please try again.";
@@ -594,6 +581,19 @@ export function useDepositState() {
         } finally {
           updateState({ isLoading: false, transactionStatus: "" });
         }
+        if (txHash) {
+          await sendForCrediting({
+            refId,
+            txHash,
+            tokenId: selectedToken.id,
+            blockchainId: activeBackendChain.id,
+            contractAddress: depositContractAddress,
+            walletAddress: activeWallet.address,
+            tokenAmount: tokenAmountNeeded.raw.toString(),
+            expectedPoints: amount,
+            currency: DEFAULT_CURRENCY,
+          });
+        }
         return;
       }
 
@@ -613,6 +613,7 @@ export function useDepositState() {
       }
 
       const refId = `pt_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      let txHash: string | undefined;
 
       try {
         // Step 1: Check ERC20 allowance
@@ -690,43 +691,12 @@ export function useDepositState() {
           transactionStatus: "Depositing to contract...",
         });
 
-        const txHash = await depositPoints.mutateAsync({
+        txHash = await depositPoints.mutateAsync({
           tokenAddress: selectedToken.contractAddress as `0x${string}`,
           refId,
           amount: tokenAmountNeeded.raw.toString(),
           tokenDecimals: selectedToken.decimals,
         });
-
-        // Step 4: Hand the hash to the API. Its deposit worker waits for
-        // the receipt at the chain's own confirmation depth, verifies the
-        // contract record, credits the points and pushes the result — so
-        // the user isn't held here for the chain, and can leave.
-        updateState({
-          isLoading: true,
-          transactionStatus: "Sending your deposit...",
-        });
-
-        await submitDeposit.mutateAsync({
-          refId,
-          txHash,
-          tokenId: selectedToken.id,
-          blockchainId: activeBackendChain.id,
-          contractAddress,
-          walletAddress: activeWallet.address,
-          tokenAmount: tokenAmountNeeded.raw.toString(),
-          expectedPoints: amount,
-          currency: DEFAULT_CURRENCY,
-        });
-
-        track("deposit_completed", {
-          chain: toChainTag(rawActiveChain.namespace),
-          amount: Number(amount),
-        });
-
-        // Step 5: Done. The deposit is out of the user's hands now; the
-        // worker's push says when the points land.
-        updateState({ isLoading: false, transactionStatus: "" });
-        announceDepositSent();
       } catch (error: any) {
         console.error("Deposit error:", error);
 
@@ -754,6 +724,24 @@ export function useDepositState() {
       } finally {
         updateState({ isLoading: false, transactionStatus: "" });
       }
+
+      // Step 4: Hand the hash to the API. Its deposit worker waits for the
+      // receipt at the chain's own confirmation depth, verifies the contract
+      // record, credits the points and pushes the result — so the user isn't
+      // held here for the chain, and can leave.
+      if (txHash) {
+        await sendForCrediting({
+          refId,
+          txHash,
+          tokenId: selectedToken.id,
+          blockchainId: activeBackendChain.id,
+          contractAddress,
+          walletAddress: activeWallet.address,
+          tokenAmount: tokenAmountNeeded.raw.toString(),
+          expectedPoints: amount,
+          currency: DEFAULT_CURRENCY,
+        });
+      }
     },
     [
       validateInputs,
@@ -766,7 +754,6 @@ export function useDepositState() {
       activeWallet,
       activeChainId,
       depositPoints,
-      submitDeposit,
       getClientForActiveWallet,
       getPublicClientForActiveChain,
       getKitForWallet,
