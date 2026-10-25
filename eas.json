@@ -6,6 +6,7 @@
   "build": {
     "development": {
       "node": "22.13.0",
+      "pnpm": "12.15.0",
       "developmentClient": true,
       "distribution": "internal",
       "environment": "development",
@@ -15,6 +16,7 @@
     },
     "preview": {
       "node": "22.13.0",
+      "pnpm": "12.15.0",
       "distribution": "internal",
       "environment": "preview",
       "env": {
@@ -23,6 +25,7 @@
     },
     "production": {
       "node": "22.13.0",
+      "pnpm": "12.15.0",
       "autoIncrement": true,
       "environment": "production",
       "env": {
