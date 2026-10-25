@@ -13,7 +13,7 @@
 
 import { router } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -33,8 +33,8 @@ import AddFundsTabs, {
 } from "@/components/add-funds/AddFundsTabs";
 import BridgeTab from "@/components/add-funds/BridgeTab";
 import BuyTab from "@/components/add-funds/BuyTab";
+import AddFundsPasses from "@/components/add-funds/passes/AddFundsPasses";
 import SwapTab from "@/components/add-funds/SwapTab";
-import TopUpPointsRow from "@/components/add-funds/TopUpPointsRow";
 import { TransfersButton } from "@/components/add-funds/transfers/TransfersEntry";
 import { TransfersSheetHost } from "@/components/add-funds/transfers/TransfersSheet";
 import SingleLoadingSekeleton from "@/components/common/SingleLoadingSekeleton";
@@ -85,6 +85,12 @@ export default function AddFundsScreen() {
     : ["swap", "bridge"];
   const [picked, setPicked] = useState<TAddFundsTab | null>(null);
   const tab: TAddFundsTab = picked && tabs.includes(picked) ? picked : tabs[0];
+  const scrollRef = useRef<ScrollView>(null);
+  // A first-time user with no USDC anywhere: take them to buying some.
+  const goToBuy = useCallback(() => {
+    setPicked(tabs.includes("buy") ? "buy" : tabs[0]);
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  }, [tabs]);
 
   // Fresh Buy state per visit; a half-finished checkout never resurfaces.
   useEffect(() => {
@@ -140,6 +146,7 @@ export default function AddFundsScreen() {
               </View>
             ) : (
               <ScrollView
+                ref={scrollRef}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={{ paddingBottom: 32 }}
@@ -164,7 +171,7 @@ export default function AddFundsScreen() {
                   <SwapTab />
                 )}
 
-                <TopUpPointsRow />
+                <AddFundsPasses onBuy={goToBuy} />
               </ScrollView>
             )}
           </View>

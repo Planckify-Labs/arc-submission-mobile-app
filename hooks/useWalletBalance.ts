@@ -102,20 +102,30 @@ export function useWalletBalance(
     return () => subscription.remove();
   }, [enabled]);
 
+  // Exposed so a caller adding to the balance (Unified Balance on the home
+  // card) renders the sum exactly the way the plain balance renders.
+  const formatRaw = useCallback(
+    (raw: bigint) => {
+      if (!kit || !chain || !namespaceMatches) return "—";
+      if (isNative) {
+        return kit.formatNativeAmount(raw, chain).split(" ")[0];
+      }
+      const formatted = formatUnits(raw, token!.decimals);
+      return formatTokenAmount(formatted, { simplify: false });
+    },
+    [chain, kit, namespaceMatches, isNative, token],
+  );
+
   const balanceFormatted = useMemo(() => {
     if (!kit || !chain || !namespaceMatches) return "—";
     if (balanceQuery.data === undefined) return "0";
-
-    if (isNative) {
-      return kit.formatNativeAmount(balanceQuery.data, chain).split(" ")[0];
-    }
-
-    const formatted = formatUnits(balanceQuery.data, token!.decimals);
-    return formatTokenAmount(formatted, { simplify: false });
-  }, [balanceQuery.data, chain, kit, namespaceMatches, isNative, token]);
+    return formatRaw(balanceQuery.data);
+  }, [balanceQuery.data, chain, kit, namespaceMatches, formatRaw]);
 
   return {
     balance: balanceFormatted,
+    raw: balanceQuery.data,
+    formatRaw,
     isLoading: balanceQuery.isLoading,
     isFetching: balanceQuery.isFetching,
     refetch: () => refetchRef.current(),

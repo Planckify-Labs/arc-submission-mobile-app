@@ -228,6 +228,16 @@ export function classifyPaymentError(err: unknown): PaymentErrorCode {
     return "intent_conflict";
   }
 
+  // Unified Balance top-up before the wallet flow (services/unifiedBalance).
+  // Its `code` is curated; nothing moved when it throws.
+  if (e.name === "UnifiedBalanceError") {
+    const code = (err as { code?: string }).code;
+    if (code === "insufficient_funds") return "insufficient_funds";
+    if (code === "user_cancelled") return "user_cancelled";
+    if (code === "unavailable") return "network";
+    return "unknown";
+  }
+
   // ── 2. HTTP status from nanopay + ky (services/nanopay/submit.ts) ──
 
   const httpStatus =

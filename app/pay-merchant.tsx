@@ -70,7 +70,7 @@ import {
 } from "react-native";
 import { SystemBars } from "react-native-edge-to-edge";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { formatUnits } from "viem";
+import { formatUnits, parseUnits } from "viem";
 import type { TBlockchain } from "@/api/types/blockchain";
 import { BaseModal, ModalHeader } from "@/components/common/BaseModal";
 import OptimizedImage from "@/components/common/OptimizedImage";
@@ -97,6 +97,7 @@ import {
   usePaymentTokens,
 } from "@/hooks/queries/usePaymentTokens";
 import { useBlockchainsWithStorage } from "@/hooks/useBlockchainsWithStorage";
+import { useUnifiedBalanceTopUp } from "@/hooks/useUnifiedBalance";
 import { useWallet } from "@/hooks/useWallet";
 import {
   buildChainConfigFromBlockchain,
@@ -136,7 +137,10 @@ import {
 } from "@/services/nanopay/pathOnchainSettlement";
 import { executeOnchainSettlementStellar } from "@/services/nanopay/pathOnchainSettlementStellar";
 import { executeOnchainSettlementSvm } from "@/services/nanopay/pathOnchainSettlementSvm";
-import { preflightShortfall } from "@/services/nanopay/preflight";
+import {
+  preflightShortfall,
+  settlementNeedRaw,
+} from "@/services/nanopay/preflight";
 import { settlementAmountLabel } from "@/services/nanopay/settlementAmount";
 import {
   chainBadgeLabel,
@@ -1069,6 +1073,41 @@ function OnchainCard({
     };
   }, [selectedWallet, selectedKit, intentChainConfig, paymentToken]);
 
+  // ── Unified Balance ───────────────────────────────────────────────
+  // When the settlement token is this chain's USDC, confirmed Unified
+  // Balance counts toward what the wallet can pay, and the shortfall is
+  // moved into the wallet's own address right before the unchanged
+  // `takumi_pay` call. The backend only ever sees a normal wallet payment.
+  const unifiedTokenRef = useMemo(
+    () =>
+      paymentToken
+        ? {
+            contractAddress: paymentToken.contractAddress,
+            isNativeCurrency: false,
+            decimals: paymentToken.decimals,
+          }
+        : null,
+    [paymentToken],
+  );
+  const unified = useUnifiedBalanceTopUp({
+    wallet: selectedWallet,
+    chain: intentChainConfig,
+    token: unifiedTokenRef,
+  });
+  const spendableTokenBalance = useMemo(() => {
+    if (!paymentToken || unified.confirmedRaw === 0n) return tokenBalance;
+    try {
+      return formatUnits(
+        parseUnits(tokenBalance || "0", paymentToken.decimals) +
+          unified.confirmedRaw,
+        paymentToken.decimals,
+      );
+    } catch {
+      return tokenBalance;
+    }
+  }, [paymentToken, tokenBalance, unified.confirmedRaw]);
+  const spendableNativeBalance = nativeBalance + unified.confirmedNativeRaw;
+
   // ── Countdown timer ───────────────────────────────────────────────
   const expiresAtMs = intent.quoteCommitment
     ? intent.quoteCommitment.expiresAt * 1000
@@ -1155,9 +1194,9 @@ function OnchainCard({
     if (!broadcastTxHashRef.current) {
       const shortfall = preflightShortfall({
         paymentToken,
-        tokenBalance,
+        tokenBalance: spendableTokenBalance,
         isLoadingTokenBalance,
-        nativeBalance,
+        nativeBalance: spendableNativeBalance,
         isLoadingBalance,
         feePaidInNative: typeof kit.sendContractTransaction === "function",
         feeNeededWei: feeEstimate?.feeWei ?? null,
@@ -1174,6 +1213,28 @@ function OnchainCard({
       setPhase("signing");
       setError(null);
       advance(broadcastTxHashRef.current ? "send" : "prepare");
+
+      // Top the wallet up from Unified Balance when it alone can't cover
+      // the payment. Never after a broadcast: a retry re-submits the hash.
+      if (
+        !broadcastTxHashRef.current &&
+        unified.applies &&
+        paymentToken?.contractAddress
+      ) {
+        const tokenAddress = paymentToken.contractAddress;
+        const readWalletRaw = () =>
+          kit.getTokenBalance(
+            selectedWallet.address,
+            intentChainConfig,
+            tokenAddress,
+          );
+        await unified.topUp({
+          needRaw: settlementNeedRaw(paymentToken, intent),
+          haveRaw: await readWalletRaw(),
+          feeWei: feeEstimate?.feeWei ?? null,
+          readWalletRaw,
+        });
+      }
 
       // Dispatch on the kit's settlement capability, not the chain
       // namespace: Solana settles via an Anchor instruction, EVM via a
@@ -1287,11 +1348,12 @@ function OnchainCard({
     paymentContract,
     queryClient,
     paymentToken,
-    tokenBalance,
+    spendableTokenBalance,
     isLoadingTokenBalance,
-    nativeBalance,
+    spendableNativeBalance,
     isLoadingBalance,
     feeEstimate,
+    unified,
   ]);
 
   // Price the fee for this exact call. Re-priced when the wallet or quote
@@ -1347,9 +1409,9 @@ function OnchainCard({
         ? null
         : preflightShortfall({
             paymentToken,
-            tokenBalance,
+            tokenBalance: spendableTokenBalance,
             isLoadingTokenBalance,
-            nativeBalance,
+            nativeBalance: spendableNativeBalance,
             isLoadingBalance,
             feePaidInNative:
               typeof selectedKit?.sendContractTransaction === "function",
@@ -1358,9 +1420,9 @@ function OnchainCard({
           }),
     [
       paymentToken,
-      tokenBalance,
+      spendableTokenBalance,
       isLoadingTokenBalance,
-      nativeBalance,
+      spendableNativeBalance,
       isLoadingBalance,
       selectedKit,
       feeEstimate,
@@ -1532,7 +1594,7 @@ function OnchainCard({
                         <Text className="text-light-matte-black/60 text-[11px]">
                           {isLoadingTokenBalance
                             ? "Loading…"
-                            : `${parseFloat(tokenBalance).toFixed(4)} ${paymentToken.symbol}`}
+                            : `${parseFloat(spendableTokenBalance).toFixed(4)} ${paymentToken.symbol}`}
                         </Text>
                       )}
                     </>
@@ -1883,13 +1945,45 @@ function MintFallback({
   // only catches what needs no quote: a wallet with none of the token, or
   // none of the network's coin for the fee. Exact amount-vs-balance is the
   // confirm card's job.
+  // Unified Balance counts toward the token the picker settles in, same
+  // rule as the confirm card, so a wallet holding no USDC here but with a
+  // Unified Balance can still reach the quote.
+  const unifiedTokenRef = useMemo(
+    () =>
+      selectedToken
+        ? {
+            contractAddress: selectedToken.contractAddress,
+            isNativeCurrency: false,
+            decimals: selectedToken.decimals,
+          }
+        : null,
+    [selectedToken],
+  );
+  const unified = useUnifiedBalanceTopUp({
+    wallet: selectedWallet,
+    chain: selectedChainConfig,
+    token: unifiedTokenRef,
+  });
+  const spendableTokenBalance = useMemo(() => {
+    if (!selectedToken || unified.confirmedRaw === 0n) return tokenBalance;
+    try {
+      return formatUnits(
+        parseUnits(tokenBalance || "0", selectedToken.decimals) +
+          unified.confirmedRaw,
+        selectedToken.decimals,
+      );
+    } catch {
+      return tokenBalance;
+    }
+  }, [selectedToken, tokenBalance, unified.confirmedRaw]);
+
   const quoteShortfall = useMemo(
     () =>
       preflightShortfall({
         paymentToken: selectedToken,
-        tokenBalance,
+        tokenBalance: spendableTokenBalance,
         isLoadingTokenBalance,
-        nativeBalance,
+        nativeBalance: nativeBalance + unified.confirmedNativeRaw,
         isLoadingBalance,
         feePaidInNative:
           typeof selectedKit?.sendContractTransaction === "function",
@@ -1898,9 +1992,10 @@ function MintFallback({
       }),
     [
       selectedToken,
-      tokenBalance,
+      spendableTokenBalance,
       isLoadingTokenBalance,
       nativeBalance,
+      unified.confirmedNativeRaw,
       isLoadingBalance,
       selectedKit,
     ],
@@ -2252,7 +2347,7 @@ function MintFallback({
                     <Text className="text-light-matte-black/60 text-[11px]">
                       {isLoadingTokenBalance
                         ? "Loading…"
-                        : `${parseFloat(tokenBalance).toFixed(4)} ${selectedToken.symbol}`}
+                        : `${parseFloat(spendableTokenBalance).toFixed(4)} ${selectedToken.symbol}`}
                     </Text>
                   )}
                 </>

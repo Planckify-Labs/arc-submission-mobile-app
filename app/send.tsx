@@ -47,6 +47,7 @@ import { useAddressBook } from "@/hooks/useAddressBook";
 import { useChainFeeTokens } from "@/hooks/useGasFeeTokenOptions";
 import { usePreferredGasToken } from "@/hooks/usePreferredGasToken";
 import { useTransferFee } from "@/hooks/useTransferFee";
+import { useUnifiedBalanceTopUp } from "@/hooks/useUnifiedBalance";
 import { useWallet } from "@/hooks/useWallet";
 import { buildChainConfigFromBlockchain } from "@/hooks/useWallet.helpers";
 import { toChainTag } from "@/services/analytics/chainTag";
@@ -406,6 +407,57 @@ export default function SendScreen() {
     [balanceDisplay],
   );
 
+  // ── Unified Balance ─────────────────────────────────────────────
+  // When the selected token is this chain's USDC, confirmed Unified
+  // Balance counts toward what can be sent (matching the home card), and
+  // the shortfall is moved into the wallet right before the send.
+  const unifiedTokenRef = useMemo(
+    () =>
+      selectedToken
+        ? {
+            contractAddress: selectedToken.contractAddress ?? null,
+            isNativeCurrency: selectedToken.isNativeCurrency !== false,
+            decimals: selectedToken.decimals,
+          }
+        : null,
+    [selectedToken],
+  );
+  const unified = useUnifiedBalanceTopUp({
+    wallet: activeWallet,
+    chain: activeChain,
+    token: unifiedTokenRef,
+  });
+  // On a chain whose gas IS USDC, the native balance is the same pool.
+  const spendableNative = balance + unified.confirmedNativeRaw;
+  const spendableTokenBalance = useMemo(() => {
+    if (!unified.applies || !selectedToken) return tokenBalance;
+    try {
+      if (selectedToken.isNativeCurrency !== false) {
+        if (unified.confirmedNativeRaw === 0n) return tokenBalance;
+        return splitFormattedNative(
+          kit.formatNativeAmount(spendableNative, activeChain),
+        ).amount;
+      }
+      if (unified.confirmedRaw === 0n) return tokenBalance;
+      const decimals = selectedToken.decimals ?? 18;
+      return formatTokenAtoms(
+        parseUnits(tokenBalance || "0", decimals) + unified.confirmedRaw,
+        decimals,
+      );
+    } catch {
+      return tokenBalance;
+    }
+  }, [
+    unified.applies,
+    unified.confirmedRaw,
+    unified.confirmedNativeRaw,
+    selectedToken,
+    tokenBalance,
+    kit,
+    spendableNative,
+    activeChain,
+  ]);
+
   // ── Live network fee ────────────────────────────────────────────
   const isTokenSend =
     selectedToken?.isNativeCurrency === false &&
@@ -522,11 +574,11 @@ export default function SendScreen() {
       return { covered: false, needed: feeQuote.needed, have: feeQuote.have };
     }
     return checkNativeFeeCoverage({
-      nativeBalance: balance,
+      nativeBalance: spendableNative,
       maxFeeNative: feeQuote.maxFeeNative,
       nativeValue: isTokenSend ? 0n : (amountRaw ?? 0n),
     });
-  }, [isLoadingBalance, feeQuote, balance, isTokenSend, amountRaw]);
+  }, [isLoadingBalance, feeQuote, spendableNative, isTokenSend, amountRaw]);
 
   /** Copy for a fee shortfall, with real numbers. Same source for the inline notice and the failure alert. */
   const feeShortfallCopy = useCallback(() => {
@@ -841,12 +893,12 @@ export default function SendScreen() {
     // of gas: the copy in `sendErrorCopy` is the single source for this.
     if (selectedToken?.isNativeCurrency !== false) {
       const raw = kit.parseNativeAmount(amount, activeChain);
-      if (raw <= 0n || raw > balance) {
+      if (raw <= 0n || raw > spendableNative) {
         const copy = sendErrorCopy("insufficient_balance", nativeSymbol);
         Alert.alert(copy.title, copy.message);
         return false;
       }
-    } else if (parseFloat(amount) > parseFloat(tokenBalance || "0")) {
+    } else if (parseFloat(amount) > parseFloat(spendableTokenBalance || "0")) {
       const copy = sendErrorCopy("insufficient_balance", selectedToken.symbol);
       Alert.alert(copy.title, copy.message);
       return false;
@@ -868,12 +920,12 @@ export default function SendScreen() {
   }, [
     kit,
     amount,
-    balance,
+    spendableNative,
     recipient,
     activeChain,
     selectedToken?.isNativeCurrency,
     selectedToken?.symbol,
-    tokenBalance,
+    spendableTokenBalance,
     nativeSymbol,
     assetReceivableWarning,
     feeShortfall,
@@ -895,6 +947,51 @@ export default function SendScreen() {
     setTransactionStatus("Preparing transaction...");
 
     await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Top the wallet up from Unified Balance when it alone can't cover the
+    // send. Its own failure stops here: nothing has been sent yet.
+    if (unified.applies && amountRaw) {
+      try {
+        setTransactionStatus("Moving USDC from your Unified Balance...");
+        const tokenAddress = isTokenSend
+          ? selectedToken?.contractAddress
+          : null;
+        const readWalletRaw = () =>
+          tokenAddress
+            ? kit.getTokenBalance(
+                activeWallet.address,
+                activeChain,
+                tokenAddress,
+              )
+            : kit.getNativeBalance(activeWallet.address, activeChain);
+        // A stablecoin-paid fee in the same token comes out of the same
+        // balance; leave room for it (with a margin for the live quote).
+        const sameTokenFee =
+          feeQuote?.mode === "abstracted" &&
+          feeQuote.symbol === selectedToken?.symbol &&
+          feeQuote.decimals === selectedToken?.decimals
+            ? (feeQuote.feeAtoms * 12n) / 10n
+            : 0n;
+        await unified.topUp({
+          needRaw: amountRaw + sameTokenFee,
+          haveRaw: await readWalletRaw(),
+          feeWei: feeQuote?.mode === "native" ? feeQuote.maxFeeNative : null,
+          readWalletRaw,
+        });
+      } catch (topUpErr) {
+        if (__DEV__) console.warn("Unified Balance top-up failed:", topUpErr);
+        setIsLoading(false);
+        const short =
+          (topUpErr as { code?: string } | null)?.code === "insufficient_funds";
+        Alert.alert(
+          short ? "Not enough USDC" : "Couldn't use your Unified Balance",
+          short
+            ? "There isn't enough USDC in your wallet and Unified Balance for this amount plus the network fee."
+            : "We couldn't move USDC from your Unified Balance. Nothing was sent. Please try again.",
+        );
+        return;
+      }
+    }
 
     try {
       setTransactionStatus("Initializing wallet...");
@@ -1193,7 +1290,7 @@ export default function SendScreen() {
                             <Text className="text-light-matte-black/70 text-xs">
                               {isLoadingTokenBalance
                                 ? "Loading token..."
-                                : `${parseFloat(tokenBalance).toFixed(4)} ${selectedToken.symbol}`}
+                                : `${parseFloat(spendableTokenBalance).toFixed(4)} ${selectedToken.symbol}`}
                             </Text>
                           )}
                       </>
@@ -1299,7 +1396,7 @@ export default function SendScreen() {
                       Balance:{" "}
                       {isLoadingTokenBalance
                         ? "Loading..."
-                        : `${parseFloat(tokenBalance).toFixed(4)} ${selectedToken.symbol}`}
+                        : `${parseFloat(spendableTokenBalance).toFixed(4)} ${selectedToken.symbol}`}
                     </Text>
                   </View>
                 )}

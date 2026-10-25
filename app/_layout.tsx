@@ -67,6 +67,7 @@ import {
 import { hydrateSigningMode } from "@/services/security/signingMode";
 import { useTransferRecordOutboxFlush } from "@/services/transfers/useTransferRecordOutboxFlush";
 import { bootTransports } from "@/services/transports/boot";
+import { bootstrapUnifiedBalanceSources } from "@/services/unifiedBalance/bootstrap";
 import { bootWalletKits } from "@/services/walletKit/boot";
 import { hasStoredWallets } from "@/services/walletService";
 import { refreshSettlementRailConfig } from "@/services/x402/refreshSettlementRailConfig";
@@ -109,6 +110,8 @@ bootDefi();
 // execute time, not registration time, so ordering vs. bootWalletKits is
 // not load-bearing — but keep it after for consistency with bootDefi.
 bootstrapBridgeAdapters();
+// Register Unified Balance sources (Circle Gateway via App Kit; EVM today).
+bootstrapUnifiedBalanceSources();
 // Register PPOB catalog categorizers (vcGamer today) — pure logic, no
 // registry deps, so ordering vs. the chain boots doesn't matter.
 bootPpobCategorizers();

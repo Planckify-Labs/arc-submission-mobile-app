@@ -4,6 +4,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Info,
   QrCode,
   Send,
 } from "lucide-react-native";
@@ -28,17 +29,21 @@ import { usePaymentFeatured } from "@/hooks/queries/useProducts";
 import { useTokens } from "@/hooks/queries/useTokens";
 import { useGoToAuth } from "@/hooks/useGoToAuth";
 import { useQRPrefetch } from "@/hooks/useQRPrefetch";
+import { useUnifiedBalanceFor } from "@/hooks/useUnifiedBalance";
 import { useWallet } from "@/hooks/useWallet";
 import { useWalletBalance } from "@/hooks/useWalletBalance";
 import { storage } from "@/lib/storage/mmkv";
 import { track } from "@/services/analytics/posthog";
+import { deriveUnifiedBalanceCard } from "@/services/unifiedBalance";
 import {
+  formatChainLabel,
   getNativeSymbol,
   matchesBlockchainRow,
 } from "@/services/walletKit/chainInfo";
 import { copyToClipboard } from "@/utils/helperUtils";
 import DisplayTokenPickerModal from "./DisplayTokenPickerModal";
 import RecievePaymentModal from "./RecievePaymentModal";
+import UnifiedBalanceSheet from "./UnifiedBalanceSheet";
 
 const SELECTED_DISPLAY_TOKEN_SYMBOL_KEY =
   "balance_section_display_token_symbol";
@@ -153,18 +158,44 @@ const BalanceSection = forwardRef<BalanceSectionRef>((props, ref) => {
   } = usePointBalance();
   const { data: paymentFeatured, refetch: refetchPayment } =
     usePaymentFeatured();
-  const { balance, isFetching, refetch } = useWalletBalance(
+  const { balance, raw, formatRaw, isFetching, refetch } = useWalletBalance(
     activeWallet,
     activeChain,
     selectedTokenInfo,
     tokenInfoReady,
   );
 
+  // Unified Balance folds into the ONE number when the selected token is
+  // this chain's USDC; the split lives behind the info icon. Everyone who
+  // never deposited sees the card exactly as before.
+  const unified = useUnifiedBalanceFor({
+    wallet: activeWallet,
+    chain: activeChain,
+    token: selectedTokenInfo,
+  });
+  const unifiedCard = deriveUnifiedBalanceCard({
+    applies: unified.applies,
+    status: unified.status,
+    confirmedRaw: unified.confirmedRaw,
+    pendingRaw: unified.pendingRaw,
+    walletRaw: raw,
+    knownUser: unified.knownUser,
+  });
+  const [unifiedSheetVisible, setUnifiedSheetVisible] = useState(false);
+  const displayedBalance =
+    unifiedCard.showDots || isFetching
+      ? "..."
+      : unifiedCard.amountRaw !== undefined
+        ? formatRaw(unifiedCard.amountRaw)
+        : balance;
+  const { refetch: refetchUnified } = unified;
+
   useImperativeHandle(ref, () => ({
     refetch: () => {
       refetch();
       refetchPoints();
       refetchPayment();
+      refetchUnified();
     },
   }));
 
@@ -259,6 +290,22 @@ const BalanceSection = forwardRef<BalanceSectionRef>((props, ref) => {
                 </Text>
                 <ChevronDown size={14} color="#c71c4b" />
               </TouchableOpacity>
+              {isShowBalance && unifiedCard.showInfo ? (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                  onPress={() => {
+                    track("feature_opened", {
+                      feature: "unified_balance_sheet",
+                    });
+                    setUnifiedSheetVisible(true);
+                  }}
+                  className="ml-2 mr-auto"
+                  accessibilityLabel="Show balance breakdown"
+                >
+                  <Info size={14} color="#c71c4b" />
+                </TouchableOpacity>
+              ) : null}
 
               <TouchableOpacity
                 activeOpacity={0.7}
@@ -279,9 +326,33 @@ const BalanceSection = forwardRef<BalanceSectionRef>((props, ref) => {
             <View>
               {isShowBalance ? (
                 <View>
-                  <Text className="text-light-primary-red font-bold text-4xl">
-                    {isFetching ? "..." : balance}
-                  </Text>
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    disabled={!unifiedCard.showInfo}
+                    onPress={() => setUnifiedSheetVisible(true)}
+                  >
+                    <Text className="text-light-primary-red font-bold text-4xl">
+                      {displayedBalance}
+                    </Text>
+                  </TouchableOpacity>
+                  {unifiedCard.arrivingRaw !== null ? (
+                    <Text className="text-light-matte-black/60 text-xs mb-1">
+                      +{formatRaw(unifiedCard.arrivingRaw)} arriving
+                    </Text>
+                  ) : unifiedCard.showRetry ? (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      onPress={refetchUnified}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <Text className="text-light-matte-black/60 text-xs mb-1">
+                        Some funds not shown ·{" "}
+                        <Text className="text-light-primary-red font-medium">
+                          Retry
+                        </Text>
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
                   {isAuthenticated ? (
                     <Text className="text-light-matte-black text-md font-light">
                       {isPointsFetching
@@ -435,6 +506,42 @@ const BalanceSection = forwardRef<BalanceSectionRef>((props, ref) => {
         closeModal={closeModal}
         activeWallet={activeWallet}
         activeChain={activeChain}
+      />
+
+      <UnifiedBalanceSheet
+        visible={unifiedSheetVisible}
+        onClose={() => setUnifiedSheetVisible(false)}
+        symbol={selectedSymbol}
+        chainLabel={formatChainLabel(activeChain)}
+        totalAmount={displayedBalance}
+        walletAmount={balance}
+        unifiedAmount={
+          unified.confirmedRaw > 0n ? formatRaw(unified.confirmedRaw) : null
+        }
+        arrivingAmount={
+          unifiedCard.arrivingRaw !== null
+            ? formatRaw(unifiedCard.arrivingRaw)
+            : null
+        }
+        walletWeight={Number(raw ?? 0n)}
+        unifiedWeight={Number(unified.confirmedRaw)}
+        arrivingWeight={Number(unifiedCard.arrivingRaw ?? 0n)}
+        failed={unifiedCard.showRetry}
+        onRetry={refetchUnified}
+        onAdd={() => {
+          setUnifiedSheetVisible(false);
+          router.push({
+            pathname: "/unified-balance",
+            params: { mode: "add" },
+          });
+        }}
+        onMove={() => {
+          setUnifiedSheetVisible(false);
+          router.push({
+            pathname: "/unified-balance",
+            params: { mode: "move" },
+          });
+        }}
       />
 
       <DisplayTokenPickerModal

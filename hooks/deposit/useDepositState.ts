@@ -13,6 +13,7 @@ import { usePointPrice } from "@/hooks/queries/usePoints";
 import { useSmartContractByChain } from "@/hooks/queries/useSmartContracts";
 import { useTokens } from "@/hooks/queries/useTokens";
 import useRQGlobalState from "@/hooks/useRQGlobalState";
+import { useUnifiedBalanceTopUp } from "@/hooks/useUnifiedBalance";
 import { useWallet } from "@/hooks/useWallet";
 import { toChainTag } from "@/services/analytics/chainTag";
 import { track } from "@/services/analytics/posthog";
@@ -363,6 +364,27 @@ export function useDepositState() {
       refetchInterval: 30_000,
     });
 
+  // Unified Balance counts toward the deposit token when it is this chain's
+  // USDC; the shortfall is moved into the wallet right before the unchanged
+  // `depositPoints` call, so the API only ever sees a normal wallet deposit.
+  const unifiedTokenRef = useMemo(
+    () =>
+      selectedToken
+        ? {
+            contractAddress: selectedToken.contractAddress ?? null,
+            isNativeCurrency: !!selectedToken.isNativeCurrency,
+            decimals: selectedToken.decimals,
+          }
+        : null,
+    [selectedToken],
+  );
+  const unified = useUnifiedBalanceTopUp({
+    wallet: activeWallet,
+    chain: rawActiveChain,
+    token: unifiedTokenRef,
+  });
+  const spendableTokenBalance = tokenBalance + unified.confirmedRaw;
+
   // EVM natives have 18 decimals; kit families format their own native
   // unit (XLM 7, SOL 9).
   const nativeBalanceFormatted = useMemo(() => {
@@ -389,16 +411,20 @@ export function useDepositState() {
   const tokenBalanceFormatted = useMemo(() => {
     if (!selectedToken) return "0";
     return parseFloat(
-      formatUnits(tokenBalance, selectedToken.decimals),
+      formatUnits(spendableTokenBalance, selectedToken.decimals),
     ).toFixed(4);
-  }, [tokenBalance, selectedToken]);
+  }, [spendableTokenBalance, selectedToken]);
 
-  const hasInsufficientNative = nativeBalance === BigInt(0);
+  // On a chain whose gas IS USDC, Unified Balance tops the fee up too.
+  const hasInsufficientNative =
+    nativeBalance + unified.confirmedNativeRaw === BigInt(0);
   const hasInsufficientToken = useMemo(() => {
-    if (tokenBalance === BigInt(0)) return true;
-    if (tokenAmountNeeded && tokenBalance < tokenAmountNeeded.raw) return true;
+    if (spendableTokenBalance === BigInt(0)) return true;
+    if (tokenAmountNeeded && spendableTokenBalance < tokenAmountNeeded.raw) {
+      return true;
+    }
     return false;
-  }, [tokenBalance, tokenAmountNeeded]);
+  }, [spendableTokenBalance, tokenAmountNeeded]);
 
   const validateInputs = useCallback(() => {
     const minimumPoints = pointPrice?.minimumPoints ?? 15000;
@@ -533,6 +559,44 @@ export function useDepositState() {
         updateState({ isLoading: false, transactionStatus: "" });
         announceDepositSent();
       };
+
+      // Top up from Unified Balance when the wallet alone is short. Runs
+      // before either deposit path; a no-op when Unified Balance doesn't
+      // apply to this token or the wallet already covers it.
+      if (unified.applies && selectedToken.contractAddress) {
+        const tokenAddress = selectedToken.contractAddress;
+        const kitForRead = getKitForWallet(activeWallet);
+        const readWalletRaw = () =>
+          kitForRead.getTokenBalance(
+            activeWallet.address,
+            rawActiveChain,
+            tokenAddress,
+          );
+        try {
+          updateState({
+            isLoading: true,
+            transactionStatus: "Moving USDC from your Unified Balance...",
+            error: undefined,
+          });
+          await unified.topUp({
+            needRaw: tokenAmountNeeded.raw,
+            haveRaw: await readWalletRaw(),
+            readWalletRaw,
+          });
+        } catch (error) {
+          if (__DEV__) console.warn("Unified Balance top-up error:", error);
+          const short =
+            (error as { code?: string } | null)?.code === "insufficient_funds";
+          updateState({
+            isLoading: false,
+            transactionStatus: "",
+            error: short
+              ? "There isn't enough USDC in your wallet and Unified Balance for this amount."
+              : "We couldn't move USDC from your Unified Balance. Nothing was spent. Please try again.",
+          });
+          return;
+        }
+      }
 
       // ── Kit path: the family's own `deposit_points` (no approval step) ──
       // The kit builds, signs, submits and confirms the deposit; this hook
@@ -762,6 +826,7 @@ export function useDepositState() {
       isAuthenticated,
       state?.trustedSpenders,
       rawActiveChain,
+      unified,
     ],
   );
 

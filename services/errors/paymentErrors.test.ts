@@ -109,3 +109,17 @@ describe("resolvePaymentErrorCopy — names what the payment was actually in", (
     );
   });
 });
+
+describe("classifyPaymentError — Unified Balance top-up", () => {
+  const ub = (code: string) =>
+    Object.assign(new Error(code), { name: "UnifiedBalanceError", code });
+
+  it("maps the curated top-up codes onto payment codes", () => {
+    expect(classifyPaymentError(ub("insufficient_funds"))).toBe(
+      "insufficient_funds",
+    );
+    expect(classifyPaymentError(ub("user_cancelled"))).toBe("user_cancelled");
+    expect(classifyPaymentError(ub("unavailable"))).toBe("network");
+    expect(classifyPaymentError(ub("failed"))).toBe("unknown");
+  });
+});

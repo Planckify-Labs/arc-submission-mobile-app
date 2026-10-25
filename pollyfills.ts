@@ -108,6 +108,10 @@ import "./node_modules/@ethersproject/bignumber/lib/index.js";
 import "./node_modules/@ethersproject/bignumber/lib.esm/bignumber.js";
 import "./node_modules/@ethersproject/bignumber/lib.esm/fixednumber.js";
 import "./node_modules/@ethersproject/bignumber/lib.esm/index.js";
+// `js-sha3` (Keccak for `@ethersproject/keccak256`, reached by App Kit's
+// Unified Balance address checks): `Keccak.prototype.toString = …` inside a
+// 'use strict' IIFE throws against the frozen prototype. One copy, CJS only.
+import "./node_modules/js-sha3/src/sha3.js";
 
 // Native-JSI crypto — replaces the pure-JS fallbacks viem / @scure / @noble
 // use (secp256k1, sha256, keccak256, pbkdf2, HMAC, etc.) with C++ via JSI.
@@ -352,6 +356,7 @@ if (__DEV__) {
   // fix: it reported 10/10 while the `_cjs` twin the app actually loads
   // was still cold.
   const canaries: [string, () => unknown][] = [
+    ["js-sha3", () => require("./node_modules/js-sha3/src/sha3.js")],
     ["ox/_cjs/Hex", () => require("./node_modules/ox/_cjs/core/Hex.js")],
     ["ox/_cjs/Bytes", () => require("./node_modules/ox/_cjs/core/Bytes.js")],
     ["ox/_cjs/Base58", () => require("./node_modules/ox/_cjs/core/Base58.js")],

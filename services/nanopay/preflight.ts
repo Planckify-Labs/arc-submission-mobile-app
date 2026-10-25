@@ -3,6 +3,23 @@ import type { PaymentErrorCode } from "../errors/paymentErrors";
 import type { PaymentIntentResponse } from "./types";
 
 /**
+ * The settlement amount in the payment token's own minor units: the api's
+ * `tokenAmountMinor` when it sends one, else the 6-decimal micros scaled.
+ */
+export function settlementNeedRaw(
+  paymentToken: { decimals: number },
+  intent: Pick<
+    PaymentIntentResponse,
+    "nanopayUsdcAmountMicros" | "tokenAmountMinor"
+  >,
+): bigint {
+  return intent.tokenAmountMinor
+    ? BigInt(intent.tokenAmountMinor)
+    : BigInt(intent.nanopayUsdcAmountMicros) *
+        10n ** BigInt(Math.max(paymentToken.decimals - 6, 0));
+}
+
+/**
  * Which balance, if any, rules the payment out before it is attempted.
  * Token first (it is what the merchant gets), then the network's own coin
  * for the fee. Returns null when balances are still loading or nothing is
@@ -47,10 +64,7 @@ export function preflightShortfall(args: {
   if (paymentToken?.contractAddress && !isLoadingTokenBalance) {
     try {
       const decimals = paymentToken.decimals;
-      const need = intent.tokenAmountMinor
-        ? BigInt(intent.tokenAmountMinor)
-        : BigInt(intent.nanopayUsdcAmountMicros) *
-          10n ** BigInt(Math.max(decimals - 6, 0));
+      const need = settlementNeedRaw(paymentToken, intent);
       const have = parseUnits(tokenBalance || "0", decimals);
       if (have < need) return "insufficient_funds";
     } catch {

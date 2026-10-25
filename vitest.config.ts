@@ -85,6 +85,11 @@ export default defineConfig({
       "services/nanopay/settlementAmount.test.ts",
       "services/nanopay/preflight.test.ts",
       "services/errors/paymentErrors.test.ts",
+      // Unified Balance (Circle Gateway via App Kit): amount math and the
+      // home card's conditional display table.
+      "services/unifiedBalance/amounts.test.ts",
+      "services/unifiedBalance/cardState.test.ts",
+      "services/unifiedBalance/passState.test.ts",
       // Onramp / Add funds (docs/onramp-app-kit-spec.md §7, §8).
       "services/onramp/onramp.test.ts",
       "services/addFunds/routeForm.test.ts",
