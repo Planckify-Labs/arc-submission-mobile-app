@@ -33,6 +33,7 @@
 import type { Account, PublicClient, WalletClient } from "viem";
 import type { TBlockchain } from "@/api/types/blockchain";
 import type { TWallet } from "@/constants/types/walletTypes";
+import type { DefiPlanHooks } from "@/services/defi/plan/hooks";
 import { classifyPointsError } from "./utils";
 
 /**
@@ -140,6 +141,13 @@ export interface ExecutorContext {
    * keep their previous behaviour.
    */
   lastUserMessage?: string;
+  /**
+   * Set only by the on-device plan runner and the plan review
+   * (`services/defi/plan/`). Binds `defi_deposit` to the call the user
+   * reviewed and reports each signature. Never derived from tool input, so
+   * the model cannot set or widen it. Absent = the executor's usual path.
+   */
+  defiPlan?: DefiPlanHooks;
 }
 
 /**

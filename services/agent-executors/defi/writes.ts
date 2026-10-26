@@ -42,6 +42,7 @@ import {
   classifyDefiError,
   DefiError,
 } from "@/services/defi/errors/defiErrors";
+import { takeApprovedDeposit } from "@/services/defi/plan/approvedDeposits";
 import { readPosition } from "@/services/defi/positions/reader";
 import {
   getDefiAdapter,
@@ -49,6 +50,7 @@ import {
   listDefiAdapters,
 } from "@/services/defi/registry";
 import { releaseSubmission } from "@/services/defi/safety/checks/layer4-execution";
+import { depositLimitPolicy } from "@/services/defi/safety/depositLimits";
 import { takeExitConsent } from "@/services/defi/safety/exitConsent";
 import {
   POSTEXEC_UNCONFIRMED_NOTE,
@@ -627,6 +629,23 @@ export const deposit: MobileToolExecutor = (input, context) =>
         opportunity?.assetContract ??
         assetContract ??
         NATIVE_ASSET_SENTINEL;
+      // Concentration and velocity limits, measured live (positions on-chain,
+      // wallet balance from the chain). Empty when ops set no limits.
+      const limitPolicy = await depositLimitPolicy({
+        walletAddress: context.wallet.address,
+        namespace: adapter.namespace,
+        chainId,
+        protocolSlug,
+        assetSymbol,
+        assetContract: opportunity?.assetContract ?? assetContract ?? undefined,
+        spendAsset: underlyingExpected,
+        amountRaw,
+        decimals,
+        chainConfigFor: (id) => {
+          const row = context.blockchains.find((b) => b.chainId === id);
+          return row ? buildChainConfigFromBlockchain(row) : undefined;
+        },
+      });
       const safetyBase: SafetyContext = {
         namespace: adapter.namespace,
         action: "deposit",
@@ -666,12 +685,30 @@ export const deposit: MobileToolExecutor = (input, context) =>
           protocolWhitelist: strategy?.protocolWhitelist ?? undefined,
           allowAllInTier: !!strategy?.allowAllInTier,
           paused: !!strategy?.pausedAt,
+          ...limitPolicy,
         },
         submissionKey: `${context.wallet.address}:${poolId ?? protocolSlug}:${amountRaw}`,
       };
       // Runs for every deposit now, resolved target or not: the checks that
       // need one declare `requiresTarget` and the runner drops exactly those.
       assertSafetyResult(await runSafetyPipeline(safetyBase));
+
+      // Binds this deposit to a call the user reviewed (services/defi/plan).
+      // A plan run passes its hooks in the context; a single deposit the
+      // agent proposed finds the shape its review card left behind. Neither
+      // comes from tool input. Absent = the usual path, unchanged.
+      const plan =
+        context.defiPlan ?? takeApprovedDeposit(safetyBase.submissionKey ?? "");
+      const planGate = async (run: () => void | Promise<void>) => {
+        try {
+          await run();
+        } catch (err) {
+          // Nothing was broadcast by this step, so the idempotency key must
+          // not outlive it: a resumed plan is not a duplicate.
+          releaseSubmission(safetyBase.submissionKey ?? "");
+          throw err;
+        }
+      };
 
       // ERC-7540 vaults cannot settle in one transaction: the deposit is a
       // REQUEST that an off-chain fulfilment later makes claimable (§7). Ask
@@ -732,6 +769,8 @@ export const deposit: MobileToolExecutor = (input, context) =>
             call: unsignedCall,
           }),
         );
+        if (plan)
+          await planGate(() => plan.onBuilt({ chainId, call: unsignedCall }));
         // No ERC-20-style approval preamble here: every Solana adapter in
         // this file embeds the SPL transfer directly in the deposit
         // instruction itself (`approvalsOf` is a no-op for a `solana-ix`
@@ -750,6 +789,7 @@ export const deposit: MobileToolExecutor = (input, context) =>
         // "before" half of the postexec delta assertion, read as late as
         // possible (same reasoning as the EVM path below).
         const solPositionBefore = await snapshotPositionBefore(safetyBase);
+        if (plan) await planGate(() => plan.beforeSign({ kind: "deposit" }));
 
         let signature: string;
         try {
@@ -763,6 +803,11 @@ export const deposit: MobileToolExecutor = (input, context) =>
             chainConfig,
             unsignedCall,
           );
+          plan?.onSigned({
+            kind: "deposit",
+            hash: signature,
+            phase: "submitted",
+          });
         } catch (err) {
           // Same phantom-failure posture as `submitEvmCall`: a broadcast
           // error is never assumed to mean nothing happened, so the
@@ -919,6 +964,8 @@ export const deposit: MobileToolExecutor = (input, context) =>
           call: unsignedCall,
         }),
       );
+      if (plan)
+        await planGate(() => plan.onBuilt({ chainId, call: unsignedCall }));
 
       // 1. Approval preamble. A two-sided LP add needs BOTH tokens approved in
       //    the same build, so iterate the normalised list rather than the
@@ -946,6 +993,14 @@ export const deposit: MobileToolExecutor = (input, context) =>
             });
           }
           if (allowance < approval.amount) {
+            if (plan) {
+              await plan.beforeSign({
+                kind: "approve",
+                token: approval.token,
+                spender: approval.spender,
+                amount: approval.amount,
+              });
+            }
             if (__DEV__) {
               console.warn("[defi/deposit] submitting approve tx", {
                 token: approval.token,
@@ -966,7 +1021,23 @@ export const deposit: MobileToolExecutor = (input, context) =>
                 approveHash,
               });
             }
+            plan?.onSigned({
+              kind: "approve",
+              token: approval.token,
+              spender: approval.spender,
+              amount: approval.amount,
+              hash: approveHash,
+              phase: "submitted",
+            });
             await publicClient.waitForTransactionReceipt({ hash: approveHash });
+            plan?.onSigned({
+              kind: "approve",
+              token: approval.token,
+              spender: approval.spender,
+              amount: approval.amount,
+              hash: approveHash,
+              phase: "confirmed",
+            });
             if (__DEV__) {
               console.warn("[defi/deposit] approve tx confirmed", {
                 approveHash,
@@ -974,6 +1045,12 @@ export const deposit: MobileToolExecutor = (input, context) =>
             }
           }
         } catch (err) {
+          // A plan hook refusing (the user stopped) is not an approval
+          // failure, and must reach the runner with its own code.
+          if (err instanceof DefiError) {
+            releaseSubmission(safetyBase.submissionKey ?? "");
+            throw err;
+          }
           if (__DEV__) {
             console.error("[defi/deposit] approval_failed", {
               token: approval.token,
@@ -1008,6 +1085,7 @@ export const deposit: MobileToolExecutor = (input, context) =>
       // "after" reading is a window in which something else could move the
       // position and get credited to this deposit.
       const positionBefore = await snapshotPositionBefore(safetyBase);
+      if (plan) await planGate(() => plan.beforeSign({ kind: "deposit" }));
 
       // 2. Submit the protocol call (phantom-failure-safe — see
       //    submitTx.ts). A broadcast error is never silently treated as
@@ -1073,6 +1151,7 @@ export const deposit: MobileToolExecutor = (input, context) =>
       if (__DEV__) {
         console.warn("[defi/deposit] protocol tx submitted", { hash });
       }
+      plan?.onSigned({ kind: "deposit", hash, phase: "submitted" });
 
       // 2a. Bounded wait for the receipt. Three things need it: the
       // post-execution position assertion below, an honest `tx_confirmed`,
@@ -1097,6 +1176,9 @@ export const deposit: MobileToolExecutor = (input, context) =>
         releaseSubmission(safetyBase.submissionKey ?? "");
         throw new DefiError("deposit_failed");
       }
+
+      if (settled)
+        plan?.onSigned({ kind: "deposit", hash, phase: "confirmed" });
 
       // 2b. ERC-7540 `requestId`, read from the request tx's own emitted
       // event rather than simulated or guessed. `requestDeposit`/

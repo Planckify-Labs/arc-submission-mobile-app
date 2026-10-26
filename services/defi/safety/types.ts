@@ -214,9 +214,12 @@ export interface SafetyPolicy {
   protocolWhitelist?: readonly string[];
   allowAllInTier?: boolean;
   paused?: boolean;
-  /** Share of the user's DeFi funds already in this protocol/family, 0–1. */
+  /**
+   * Share of the user's total money (wallet asset + DeFi) this protocol
+   * family would hold AFTER this deposit, 0–1. Fed by `exposure.ts`.
+   */
   currentExposurePct?: number;
-  /** Ceiling for the above, 0–1. */
+  /** Ceiling for the above, 0–1. Absent = no cap applies to this deposit. */
   maxExposurePct?: number;
   /** Deposits already made in the rolling velocity window. */
   recentDepositCount?: number;

@@ -68,6 +68,8 @@ export type AnalyticsEventProps = {
     amount_usd: number;
   };
   defi_quick_invest_browse: { entry_state: number };
+  /** The plan review was confirmed (one device check passed). */
+  defi_plan_confirmed: { legs: number; amount_usd: number };
   defi_deposit_completed: {
     chain: string;
     protocol_slug?: string;

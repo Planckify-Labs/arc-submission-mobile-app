@@ -299,6 +299,7 @@ const MessageContent: React.FC<MessageContentProps> = React.memo(
                   decision={part.decision}
                   onRequestApproval={liveRequestApproval}
                   showSetupCTA={part.toolCallId === setupCtaOwnerId}
+                  toolCallId={part.toolCallId}
                 />
               );
             }

@@ -29,6 +29,7 @@ import {
   setDefiEnabledChains,
   setKilledFamilies,
 } from "./checks/layer3-policy";
+import { setExposureLimits } from "./limits";
 import { type SafetyAuditEntry, setSafetyAuditSink } from "./registry";
 
 export interface DefiOpsConfig {
@@ -43,6 +44,24 @@ export interface DefiOpsConfig {
    * to list one costs availability rather than safety.
    */
   readonly enabledChains?: readonly (number | string)[] | null;
+  /**
+   * Most of a user's total money (wallet asset + DeFi) one protocol may
+   * hold, in percent. Absent = no concentration cap. See `exposure.ts`.
+   */
+  readonly maxProtocolSharePct?: number | null;
+  /** The cap applies only once that protocol would hold this many USD. */
+  readonly exposureMinUsd?: number | null;
+  /** Most deposits in a rolling hour. Absent = no velocity cap. */
+  readonly maxDepositsPerHour?: number | null;
+}
+
+/** A positive number, or null for "not set" (and for garbage, logged). */
+function parsePositive(raw: string | undefined, name: string): number | null {
+  if (raw === undefined || raw.trim() === "") return null;
+  const n = Number(raw);
+  if (Number.isFinite(n) && n > 0) return n;
+  if (__DEV__) console.warn(`[defi/opsConfig] ignoring invalid ${name}`);
+  return null;
 }
 
 function parseList(raw: string | undefined): string[] {
@@ -67,6 +86,18 @@ export function opsConfigFromEnv(): DefiOpsConfig {
     // Absent env ⇒ `null` ⇒ no per-chain gate, NOT "zero chains enabled".
     // The opposite default would dark every chain the moment this shipped.
     enabledChains: chains.length > 0 ? chains : null,
+    maxProtocolSharePct: parsePositive(
+      process.env.EXPO_PUBLIC_DEFI_MAX_PROTOCOL_SHARE_PCT,
+      "EXPO_PUBLIC_DEFI_MAX_PROTOCOL_SHARE_PCT",
+    ),
+    exposureMinUsd: parsePositive(
+      process.env.EXPO_PUBLIC_DEFI_EXPOSURE_MIN_USD,
+      "EXPO_PUBLIC_DEFI_EXPOSURE_MIN_USD",
+    ),
+    maxDepositsPerHour: parsePositive(
+      process.env.EXPO_PUBLIC_DEFI_MAX_DEPOSITS_PER_HOUR,
+      "EXPO_PUBLIC_DEFI_MAX_DEPOSITS_PER_HOUR",
+    ),
   };
 }
 
@@ -81,6 +112,16 @@ export function applyDefiOpsConfig(config: DefiOpsConfig): void {
   setDefiEnabledChains(
     config.enabledChains === undefined ? null : config.enabledChains,
   );
+  const pct = config.maxProtocolSharePct ?? null;
+  setExposureLimits({
+    // A share above 100% is no cap at all.
+    maxShare: pct !== null && pct < 100 ? pct / 100 : null,
+    minUsd: config.exposureMinUsd ?? 0,
+    maxDepositsPerHour:
+      config.maxDepositsPerHour != null
+        ? Math.floor(config.maxDepositsPerHour)
+        : null,
+  });
 }
 
 /**

@@ -185,6 +185,12 @@ export default defineConfig({
       // Quick Invest allocation (docs/defi-quick-invest-spec.md §5, §10) —
       // the client-side split behind the redesigned opportunity card.
       "services/defi/quickInvest.test.ts",
+      "services/defi/plan/hooks.test.ts",
+      "services/defi/plan/fit.test.ts",
+      "services/defi/plan/format.test.ts",
+      "services/defi/plan/runner.test.ts",
+      "services/defi/plan/activity.test.ts",
+      "services/defi/safety/exposure.test.ts",
       "services/defi/safety/safetyPipeline.test.ts",
       "services/defi/safety/depositCapGates.test.ts",
       "services/defi/safety/routeSafety.test.ts",

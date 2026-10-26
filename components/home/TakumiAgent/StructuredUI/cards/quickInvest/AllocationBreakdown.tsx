@@ -14,13 +14,14 @@ import { ChevronDown, ChevronUp } from "lucide-react-native";
 import { Text, TouchableOpacity, View } from "react-native";
 import { prettyProtocol } from "@/services/defi/opportunityDisplay";
 import { chainLabel } from "@/services/defi/opportunityLabels";
+import { LEG_COLORS } from "@/services/defi/plan/format";
 import type { Allocation, QuickInvestRow } from "@/services/defi/quickInvest";
 import { formatUsd } from "@/services/defi/quickInvest";
 import { tapFeedback } from "@/utils/hapticsUtils";
 
 const BRAND_RED = "#c71c4b";
 /** Positional accents, mirroring the mockup's three-dot legend. */
-const DOTS = ["#c71c4b", "#f0a33e", "#3e8ef0"];
+const DOTS = LEG_COLORS;
 
 export default function AllocationBreakdown({
   allocation,

@@ -193,7 +193,8 @@ describe("chainInfo.getChainKey", () => {
 describe("chainInfo.supportsPointDeposit", () => {
   it("true only for families with an Add Points execution path", () => {
     assert.equal(supportsPointDeposit(ethereumChain), true);
-    assert.equal(supportsPointDeposit(solanaMainnet), false);
+    // Solana gained its execution path in 85eb58f (docked kit deposit).
+    assert.equal(supportsPointDeposit(solanaMainnet), true);
     assert.equal(supportsPointDeposit(suiTestnet), false);
   });
 

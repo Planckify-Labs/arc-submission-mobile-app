@@ -41,6 +41,11 @@ export type ToolComponentProps<Input, Output> = {
    * Defaults to true when a card is rendered outside that parent.
    */
   showSetupCTA?: boolean;
+  /**
+   * The tool call this card renders. Lets a card key state that must outlive
+   * the render (a confirmed DeFi plan run) to the call that drew it.
+   */
+  toolCallId?: string;
 };
 
 export type ToolComponent<Input, Output> = React.ComponentType<

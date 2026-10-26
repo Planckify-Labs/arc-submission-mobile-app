@@ -610,7 +610,15 @@ function GroupCard({
 
 const OpportunityListCard: React.FC<
   ToolComponentProps<OpportunityInput, OpportunityOutput>
-> = ({ state, input, output, mode, onUserPrompt, showSetupCTA = true }) => {
+> = ({
+  state,
+  input,
+  output,
+  mode,
+  onUserPrompt,
+  showSetupCTA = true,
+  toolCallId,
+}) => {
   const { data: strategy } = useUserStrategy();
   const { wallets } = useWallet();
   const { promptFor, sheet: addWalletSheet } = useAddWalletPrompt();
@@ -903,6 +911,7 @@ const OpportunityListCard: React.FC<
             setViewMode("browse");
           }}
           showSetupCTA={showSetupCTA}
+          toolCallId={toolCallId}
         />
         {addWalletSheet}
       </>

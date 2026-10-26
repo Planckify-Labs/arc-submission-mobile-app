@@ -82,6 +82,7 @@ import {
   type WalletContext,
 } from "@/services/agentSession";
 import { track } from "@/services/analytics/posthog";
+import { recentPlanActivity } from "@/services/defi/plan/activity";
 import { bindRouteSafetyChains } from "@/services/defi/safety/routeChainResolver";
 import { pendingTxStore } from "@/services/pendingTxStore";
 import {
@@ -1217,9 +1218,15 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
       if (freshPointsAuth !== pointsAuthenticated) {
         setPointsAuthenticated(freshPointsAuth);
       }
+      // Plans confirmed on a card ran on the device, outside this chat;
+      // tell the agent what happened so it never re-offers them blindly.
+      const recentActivity = recentPlanActivity(walletContext.address);
       const sendWalletContext: WalletContext = {
         ...walletContext,
         points_authenticated: freshPointsAuth,
+        ...(recentActivity.length > 0
+          ? { recent_activity: recentActivity }
+          : {}),
       };
 
       const now = Date.now();

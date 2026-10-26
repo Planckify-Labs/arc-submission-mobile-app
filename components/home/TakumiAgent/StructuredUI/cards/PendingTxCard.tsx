@@ -24,6 +24,7 @@ import {
 import type React from "react";
 import { useEffect, useState } from "react";
 import { Pressable, Text, TouchableOpacity, View } from "react-native";
+import { useRouteContext } from "@/hooks/addFunds/useRouteContext";
 import { recordExitConsent } from "@/services/defi/safety/exitConsent";
 import { exitDelaySeconds } from "@/services/defi/safety/types";
 import {
@@ -49,6 +50,9 @@ import {
 import type { ToolComponentProps, ToolDecision } from "../types";
 import WriteApprovalGate from "../WriteApprovalGate";
 import { AddWalletErrorAction } from "./AddWalletErrorAction";
+import DepositProposalReview, {
+  isReviewableDeposit,
+} from "./plan/DepositProposalReview";
 
 type WriteToolOutput = {
   status?: "success" | "failed" | string;
@@ -326,6 +330,7 @@ function DepositApprovalGate({
   // A withdraw carries `position_id`; its exit terms are not a precondition of
   // leaving, and warning there would only discourage an exit already in motion.
   const isDeposit = !!poolId && !input.position_id;
+  const { context } = useRouteContext();
   const { data: terms } = useExitTerms(isDeposit ? poolId : undefined);
   const { data: risk } = useDepositRisk(isDeposit ? poolId : undefined);
   const exitNotice = isDeposit ? exitTermsNotice(terms) : null;
@@ -343,6 +348,20 @@ function DepositApprovalGate({
     }
     addToolResult({ status: "success", user_decision: "approved" });
   };
+
+  // A pool deposit the agent proposed gets the full review (amount, fee,
+  // exit, steps, checks) instead of the one-line proposal.
+  if (isDeposit && context && isReviewableDeposit(input)) {
+    return (
+      <DepositProposalReview
+        input={input}
+        context={context}
+        decision={decision}
+        addToolResult={addToolResult}
+        onRequestApproval={onRequestApproval}
+      />
+    );
+  }
 
   return (
     <WriteApprovalGate

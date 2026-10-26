@@ -29,9 +29,11 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import {
+  ArrowDown,
   ArrowRight,
   ListFilter,
   ShieldAlert,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   TrendingUp,
@@ -39,11 +41,15 @@ import {
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
+import { erc20Abi, parseUnits } from "viem";
 import { strategiesApi } from "@/api/endpoints/strategies";
 import SingleLoadingSekeleton from "@/components/common/SingleLoadingSekeleton";
+import { useRouteContext } from "@/hooks/addFunds/useRouteContext";
 import { useIdleAssetBalances } from "@/hooks/defi/useIdleAssetBalances";
+import { usePlanRun } from "@/hooks/defi/usePlan";
 import { useUserStrategy } from "@/hooks/queries/useStrategy";
 import { useWallet } from "@/hooks/useWallet";
+import { resolveChainClients } from "@/services/agent-executors/chainRouter";
 import { track } from "@/services/analytics/posthog";
 import {
   isTestnetRow,
@@ -51,6 +57,8 @@ import {
 } from "@/services/defi/opportunityDisplay";
 import { chainLabel, TIER_LABEL } from "@/services/defi/opportunityLabels";
 import { shapeOpportunity } from "@/services/defi/opportunityShape";
+import type { TPlanInput } from "@/services/defi/plan/preview";
+import { beginPlanRun, runPlan } from "@/services/defi/plan/runner";
 import type { QuickInvestRow } from "@/services/defi/quickInvest";
 import {
   allocatableRows,
@@ -66,6 +74,8 @@ import {
   usdToTokenAmount,
 } from "@/services/defi/quickInvest";
 import { getDefiAdapter } from "@/services/defi/registry";
+import PlanProgressCard from "./plan/PlanProgressCard";
+import PlanReviewCard from "./plan/PlanReviewCard";
 import AllocationBreakdown from "./quickInvest/AllocationBreakdown";
 import AmountSlider from "./quickInvest/AmountSlider";
 import RiskDial, { type RiskTier } from "./quickInvest/RiskDial";
@@ -117,6 +127,11 @@ const OpportunityQuickInvestCard: React.FC<{
   onUserPrompt?: (prompt: string) => void;
   onBrowse: () => void;
   showSetupCTA?: boolean;
+  /**
+   * The tool call that drew this card. Names the plan run, so a confirmed
+   * plan is found again after scrolling away or reopening the chat.
+   */
+  toolCallId?: string;
 }> = ({
   input,
   rows,
@@ -125,6 +140,7 @@ const OpportunityQuickInvestCard: React.FC<{
   onUserPrompt,
   onBrowse,
   showSetupCTA = true,
+  toolCallId,
 }) => {
   const { activeWallet } = useWallet();
   const { data: strategy } = useUserStrategy();
@@ -340,15 +356,36 @@ const OpportunityQuickInvestCard: React.FC<{
   const needsAmountChoice = pinnedAmount === null && defaultAmount <= 0;
   const noPools = allocation.legs.length === 0;
   const canSubmit =
-    !!onUserPrompt &&
+    (!!onUserPrompt || !!toolCallId) &&
     allocation.legs.length > 0 &&
     canConvert &&
     !tierLoading &&
     !needsAmountChoice;
 
-  const submit = () => {
-    if (!onUserPrompt || !canConvert) return;
-    const legs = allocation.legs.map((leg) => ({
+  // ── Start this plan: review, one check, then the runner ────────────
+  // The plan card stays where it is; the review appears as its own card
+  // below it. Once confirmed, the run lives in `planRunStore` under this
+  // card's id and the progress card reads it from there.
+  const { context: execContext } = useRouteContext();
+  // Named by the tool call so the run is found again after reopening the
+  // chat. A card without one still gets a run id of its own: a missing id
+  // must never push the plan back onto the old raw-prompt path.
+  const localPlanId = useRef(
+    `local:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+  );
+  const planId = toolCallId
+    ? `quick:${toolCallId}`
+    : `quick:${localPlanId.current}`;
+  const planRun = usePlanRun(planId);
+  const [review, setReview] = useState<TPlanInput | null>(null);
+  const planStage: "idle" | "review" | "running" = planRun
+    ? "running"
+    : review
+      ? "review"
+      : "idle";
+
+  const legsForPrompt = () =>
+    allocation.legs.map((leg) => ({
       amount:
         usdToTokenAmount(leg.amountUsd, priceUsd, targetIdle?.decimals ?? 6) ??
         "0",
@@ -362,15 +399,163 @@ const OpportunityQuickInvestCard: React.FC<{
       ),
       poolId: leg.row.pool_id,
     }));
-    if (legs.some((l) => l.amount === "0")) return;
+
+  /**
+   * The asset's decimals: from the balance read when it has them, else from
+   * the token contract itself. Never assumed.
+   */
+  const resolveDecimals = async (): Promise<number | undefined> => {
+    if (targetIdle?.decimals !== undefined) return targetIdle.decimals;
+    const row = allocation.legs[0]?.row;
+    if (
+      !execContext ||
+      !row?.asset_contract ||
+      typeof row.chain_id !== "number"
+    ) {
+      return undefined;
+    }
+    try {
+      const { publicClient } = resolveChainClients(row.chain_id, execContext);
+      const d = await publicClient.readContract({
+        address: row.asset_contract as `0x${string}`,
+        abi: erc20Abi,
+        functionName: "decimals",
+      });
+      return Number(d);
+    } catch {
+      return undefined;
+    }
+  };
+
+  /** The exact legs to review, or null when this device cannot run them. */
+  const planInput = (decimals: number | undefined): TPlanInput | null => {
+    if (!execContext || decimals === undefined || !targetAsset) {
+      if (__DEV__) {
+        console.warn("[quickInvest] no on-device plan", {
+          hasContext: !!execContext,
+          decimals,
+          targetAsset,
+        });
+      }
+      return null;
+    }
+    const legs: TPlanInput["legs"] = [];
+    for (const leg of allocation.legs) {
+      const human = usdToTokenAmount(leg.amountUsd, priceUsd, decimals);
+      if (!human || !leg.row.pool_id) {
+        if (__DEV__) {
+          console.warn("[quickInvest] leg not sizable", {
+            pool: leg.row.pool_id,
+            human,
+          });
+        }
+        return null;
+      }
+      const spot = Number(leg.row.apy);
+      legs.push({
+        poolId: leg.row.pool_id,
+        protocolSlug: leg.row.protocol_slug,
+        protocolLabel: prettyProtocol(leg.row.protocol_slug),
+        vaultLabel: leg.row.pool_meta ?? null,
+        assetSymbol: leg.row.asset_symbol ?? targetAsset,
+        chainId: leg.row.chain_id,
+        amountRaw: parseUnits(human, decimals).toString(),
+        expectedApy: Number.isFinite(spot) ? spot : undefined,
+        displayApy: leg.apy,
+      });
+    }
+    return {
+      legs,
+      assetSymbol: targetAsset,
+      assetDecimals: decimals,
+      priceUsd,
+      trimForFees: true,
+    };
+  };
+
+  const [preparing, setPreparing] = useState(false);
+  const submit = async () => {
+    if (!canConvert || planStage !== "idle" || preparing) return;
     track("defi_quick_invest_submitted", {
       entry_state: entryState,
       tier,
-      legs: legs.length,
+      legs: allocation.legs.length,
       amount_usd: allocation.totalUsd,
     });
+    setPreparing(true);
+    const input = planInput(
+      await resolveDecimals().finally(() => setPreparing(false)),
+    );
+    if (input) {
+      setReview(input);
+      return;
+    }
+    // No on-device path (no wallet context, or an asset we cannot size):
+    // hand the plan to the agent as before.
+    const legs = legsForPrompt();
+    if (!onUserPrompt || legs.some((l) => l.amount === "0")) return;
     onUserPrompt(buildDepositPrompt(legs));
   };
+
+  const onPlanConfirmed = (preview: Parameters<typeof beginPlanRun>[1]) => {
+    if (!planId || !execContext) return;
+    track("defi_plan_confirmed", {
+      legs: preview.legs.filter((l) => l.ok).length,
+      amount_usd: allocation.totalUsd,
+    });
+    beginPlanRun(planId, preview, execContext.wallet.address);
+    setReview(null);
+    void runPlan(planId, execContext);
+  };
+
+  const lockedCta = (
+    <View className="mt-3 h-[50px] flex-row items-center justify-center gap-2 rounded-full bg-light-matte-black/[0.08]">
+      <Text className="text-sm font-semibold text-light-matte-black/60">
+        {planStage === "review" ? "Reviewing below" : "Plan confirmed"}
+      </Text>
+      {planStage === "review" ? (
+        <ArrowDown size={15} color="rgba(29,29,31,0.6)" strokeWidth={2.4} />
+      ) : null}
+    </View>
+  );
+
+  /** What follows the plan card: the review, or the run. */
+  const planTail =
+    planStage === "running" && planId ? (
+      <>
+        <View className="mt-3 flex-row items-center gap-2.5 rounded-2xl border border-light-matte-black/[0.08] bg-white px-4 py-3">
+          <ShieldCheck size={18} color="#047857" />
+          <View className="flex-1">
+            <Text className="text-[13px] font-semibold text-light-matte-black">
+              Plan confirmed
+            </Text>
+            <Text className="text-xs text-gray-500">
+              {`${planRun?.legs.length ?? 0} ${
+                (planRun?.legs.length ?? 0) === 1 ? "vault" : "vaults"
+              }${planRun?.chainName ? ` on ${planRun.chainName}` : ""}`}
+            </Text>
+          </View>
+        </View>
+        <PlanProgressCard planId={planId} context={execContext} />
+      </>
+    ) : planStage === "review" && review && execContext ? (
+      <PlanReviewCard
+        input={review}
+        context={execContext}
+        mode="plan"
+        onChangePlan={() => setReview(null)}
+        onCancel={() => setReview(null)}
+        onConfirmed={onPlanConfirmed}
+        onAgentFallback={
+          onUserPrompt
+            ? () => {
+                setReview(null);
+                onUserPrompt(buildDepositPrompt(legsForPrompt()));
+              }
+            : undefined
+        }
+      />
+    ) : null;
 
   const goBrowse = () => {
     track("defi_quick_invest_browse", { entry_state: entryState });
@@ -534,25 +719,29 @@ const OpportunityQuickInvestCard: React.FC<{
               chainNames.length === 1 ? ` on ${chainNames[0]}` : ""
             }`}
           </Text>
-          <TouchableOpacity
-            onPress={submit}
-            disabled={!canSubmit}
-            activeOpacity={0.85}
-            className={`mt-3 flex-row items-center justify-center gap-2 rounded-full px-4 py-3 ${
-              canSubmit ? "bg-light-primary-red" : "bg-light-matte-black/15"
-            }`}
-          >
-            <Text
-              className={`text-sm font-bold ${
-                canSubmit ? "text-white" : "text-light-matte-black/40"
+          {planStage === "idle" ? (
+            <TouchableOpacity
+              onPress={submit}
+              disabled={!canSubmit}
+              activeOpacity={0.85}
+              className={`mt-3 flex-row items-center justify-center gap-2 rounded-full px-4 py-3 ${
+                canSubmit ? "bg-light-primary-red" : "bg-light-matte-black/15"
               }`}
             >
-              {`Invest ${formatUsd(allocation.totalUsd)} now`}
-            </Text>
-            {canSubmit ? (
-              <ArrowRight size={16} color="#ffffff" strokeWidth={2.5} />
-            ) : null}
-          </TouchableOpacity>
+              <Text
+                className={`text-sm font-bold ${
+                  canSubmit ? "text-white" : "text-light-matte-black/40"
+                }`}
+              >
+                {`Invest ${formatUsd(allocation.totalUsd)} now`}
+              </Text>
+              {canSubmit ? (
+                <ArrowRight size={16} color="#ffffff" strokeWidth={2.5} />
+              ) : null}
+            </TouchableOpacity>
+          ) : (
+            lockedCta
+          )}
         </View>
         {secondaryRow(
           <TouchableOpacity
@@ -568,7 +757,8 @@ const OpportunityQuickInvestCard: React.FC<{
             </Text>
           </TouchableOpacity>,
         )}
-        {showSetupCTA ? <SetupStrategyCTA /> : null}
+        {showSetupCTA && planStage === "idle" ? <SetupStrategyCTA /> : null}
+        {planTail}
       </View>
     );
   }
@@ -596,7 +786,13 @@ const OpportunityQuickInvestCard: React.FC<{
   // ── States 1 and 2 (and State 3 once adjusted): the Simulator ───────
   return (
     <View className="my-1.5">
-      <View className="rounded-2xl border border-light-matte-black/10 bg-white px-3.5 py-3.5">
+      {/* Frozen while under review or running: the review is a snapshot of
+          this plan, and "Change plan" is the way back to editing it. */}
+      <View
+        pointerEvents={planStage === "idle" ? "auto" : "none"}
+        style={{ opacity: planStage === "idle" ? 1 : 0.7 }}
+        className="rounded-2xl border border-light-matte-black/10 bg-white px-3.5 py-3.5"
+      >
         <View className="flex-row items-center gap-2">
           <TrendingUp size={13} color={BRAND_RED} />
           <Text className="text-[11px] font-bold uppercase tracking-wide text-light-matte-black">
@@ -692,32 +888,37 @@ const OpportunityQuickInvestCard: React.FC<{
         </Text>
       ) : null}
 
-      <TouchableOpacity
-        onPress={submit}
-        disabled={!canSubmit}
-        activeOpacity={0.85}
-        className={`mt-2 flex-row items-center justify-center gap-2 rounded-full px-4 py-3 ${
-          canSubmit ? "bg-light-primary-red" : "bg-light-matte-black/15"
-        }`}
-      >
-        <Text
-          className={`text-sm font-bold ${
-            canSubmit ? "text-white" : "text-light-matte-black/40"
+      {planStage === "idle" ? (
+        <TouchableOpacity
+          onPress={submit}
+          disabled={!canSubmit}
+          activeOpacity={0.85}
+          className={`mt-2 flex-row items-center justify-center gap-2 rounded-full px-4 py-3 ${
+            canSubmit ? "bg-light-primary-red" : "bg-light-matte-black/15"
           }`}
         >
-          {noPools || needsAmountChoice
-            ? "Choose an amount"
-            : entryState === 2
-              ? "Start this plan"
-              : `Invest ${formatUsd(amount, { cents: false })}`}
-        </Text>
-        {canSubmit ? (
-          <ArrowRight size={16} color="#ffffff" strokeWidth={2.5} />
-        ) : null}
-      </TouchableOpacity>
+          <Text
+            className={`text-sm font-bold ${
+              canSubmit ? "text-white" : "text-light-matte-black/40"
+            }`}
+          >
+            {noPools || needsAmountChoice
+              ? "Choose an amount"
+              : entryState === 2
+                ? "Start this plan"
+                : `Invest ${formatUsd(amount, { cents: false })}`}
+          </Text>
+          {canSubmit ? (
+            <ArrowRight size={16} color="#ffffff" strokeWidth={2.5} />
+          ) : null}
+        </TouchableOpacity>
+      ) : (
+        lockedCta
+      )}
 
-      {secondaryRow(whyTheseVenues)}
-      {showSetupCTA ? <SetupStrategyCTA /> : null}
+      {planStage === "idle" ? secondaryRow(whyTheseVenues) : null}
+      {showSetupCTA && planStage === "idle" ? <SetupStrategyCTA /> : null}
+      {planTail}
     </View>
   );
 };

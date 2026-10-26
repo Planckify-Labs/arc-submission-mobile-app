@@ -151,7 +151,9 @@ export const ExposureCapCheck: SafetyCheck = {
     ) {
       return { ok: true };
     }
-    return policy.currentExposurePct >= policy.maxExposurePct
+    // Both are shares AFTER this deposit (see `exposure.ts`), so landing
+    // exactly on the cap is allowed and only going past it is refused.
+    return policy.currentExposurePct > policy.maxExposurePct
       ? {
           ok: false,
           fail: "exposure_cap_exceeded",

@@ -74,6 +74,44 @@ export interface WalletContext {
    * as "unknown" and says nothing about ownership rather than guessing.
    */
   owned_namespaces?: Array<"eip155" | "solana" | "sui" | "stellar">;
+  /**
+   * What the user did from app cards, outside the chat, recently. A plan
+   * confirmed on the Quick Invest card runs on the device and never passes
+   * through the agent, so without this the agent cannot know it happened
+   * and may offer the same deposit again. Typed, capped facts only; the
+   * server renders them as data, never as instructions.
+   */
+  recent_activity?: RecentActivity[];
+}
+
+export type RecentActivityLegStatus =
+  | "waiting"
+  | "active"
+  | "done"
+  | "requested"
+  | "paused_rate"
+  | "blocked"
+  | "failed"
+  | "unconfirmed"
+  | "skipped"
+  | "not_started"
+  | "stopped";
+
+export interface RecentActivity {
+  kind: "defi_plan";
+  /** ISO time of the run's last change. */
+  at: string;
+  state: "running" | "halted" | "done";
+  chain_name?: string;
+  asset: string;
+  legs: Array<{
+    vault: string;
+    protocol: string;
+    /** Decimal amount in the asset ("70.28"). */
+    amount: string;
+    status: RecentActivityLegStatus;
+    tx_hash?: string;
+  }>;
 }
 
 // --- Tool classification ----------------------------------------------------
