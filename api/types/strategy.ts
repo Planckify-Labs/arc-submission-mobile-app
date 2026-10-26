@@ -56,6 +56,8 @@ export interface TOpportunity {
   ilExposure: boolean;
   score: number;
   tier: RiskTier;
+  /** Reason codes behind `tier` (api scoring rules). */
+  tierReasons?: string[] | null;
   scoredAt: string;
   /** Exit-side risk read server-side at score time (api
    *  `market-risk.client.ts`). Null/absent = no signals, never "no risk". */

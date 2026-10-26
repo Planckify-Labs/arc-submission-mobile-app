@@ -9,8 +9,9 @@
  * only.
  *
  * Presentation (full redesign):
- *  - Rows are ranked by safety (`score` desc, APY as tiebreak) so the
- *    safest venue leads; testnets sink to the bottom and are hidden
+ *  - Rows are ranked by `score` desc (lowest-risk tier first, then the
+ *    pool's 30-day realistic yield; APY as tiebreak) so the safest venue
+ *    leads; testnets sink to the bottom and are hidden
  *    entirely in production builds when any mainnet row exists.
  *  - The list pages in groups of `PREVIEW_COUNT` via Prev/Next (shared
  *    `PagerButton`), mirroring the redemption-catalog card.
@@ -82,7 +83,11 @@ import {
   prettyProtocol,
   type RawOpportunity,
 } from "@/services/defi/opportunityDisplay";
-import { chainLabel, TIER_LABEL } from "@/services/defi/opportunityLabels";
+import {
+  chainLabel,
+  TIER_LABEL,
+  tierReasonSummary,
+} from "@/services/defi/opportunityLabels";
 import { protocolAppUrl } from "@/services/defi/protocolLinks";
 import { buildDepositPrompt } from "@/services/defi/quickInvest";
 import { getChainFamilyLabel } from "@/services/walletKit/chainInfo";
@@ -122,6 +127,10 @@ type OpportunityRow = {
   score?: number;
   tier?: RiskTier | string;
   il_exposure?: boolean;
+  /** Reason codes behind `tier`; labelled by `tierReasonSummary`. */
+  tier_reasons?: string[];
+  /** Recent unreturned exploit: deposits paused, never sent to the site. */
+  deposit_paused?: boolean;
 };
 
 type OpportunityInput = {
@@ -193,13 +202,6 @@ function formatTvl(value: OpportunityRow["tvl_usd"]): string | null {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M TVL`;
   if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K TVL`;
   return `$${n.toFixed(0)} TVL`;
-}
-
-function formatSafety(value: OpportunityRow["score"]): string | null {
-  if (value === undefined || value === null) return null;
-  const n = typeof value === "string" ? Number(value) : value;
-  if (!Number.isFinite(n)) return null;
-  return `Safety ${Math.round(n)}`;
 }
 
 function SkeletonRow() {
@@ -349,7 +351,9 @@ function PoolRow({
   const tierClass = TIER_PILL_COLOR[tierKey] ?? "bg-gray-100 text-gray-700";
   const chain = chainLabel(pool.chain_name, pool.chain_id, pool.namespace);
   const tvl = formatTvl(pool.tvl_usd);
-  const safety = formatSafety(pool.score);
+  // Why the tier is what it is, in words. `score` is an ordering key (tier
+  // band, then realistic yield), not a safety number, so it is not shown.
+  const safety = tierReasonSummary(pool.tier_reasons);
   // Standalone rows show asset · chain; inside a group the header already does.
   const meta = showProtocol
     ? [pool.asset_symbol, chain].filter(Boolean).join(" · ")
@@ -418,7 +422,11 @@ function PoolRow({
           {pool.il_exposure ? (
             <Text className="text-[11px] text-rose-600">· IL risk</Text>
           ) : null}
-          {!inApp ? (
+          {pool.deposit_paused ? (
+            <Text className="text-[11px] text-amber-700 font-medium">
+              {tvl || safety ? "· " : ""}Deposits paused
+            </Text>
+          ) : !inApp ? (
             <Text className="text-[11px] text-light-primary-red font-medium">
               {tvl || safety ? "· " : ""}Deposit on site ↗
             </Text>

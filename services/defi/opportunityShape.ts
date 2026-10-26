@@ -79,6 +79,8 @@ export function shapeOpportunity(o: TOpportunity) {
     tvl_usd: o.tvlUsd,
     score: o.score,
     tier: o.tier,
+    // Codes behind the tier; the cards own the words (opportunityLabels.ts).
+    tier_reasons: o.tierReasons ?? [],
     il_exposure: o.ilExposure,
     scored_at: o.scoredAt,
   };

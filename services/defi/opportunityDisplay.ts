@@ -34,6 +34,10 @@ export interface RawOpportunity {
   score?: number;
   tier?: string;
   il_exposure?: boolean;
+  /** Reason codes behind `tier` (labelled in opportunityLabels.ts). */
+  tier_reasons?: string[];
+  /** Recent unreturned exploit: deposits paused (server verdict). */
+  deposit_paused?: boolean;
 }
 
 export interface DisplayPool extends RawOpportunity {
