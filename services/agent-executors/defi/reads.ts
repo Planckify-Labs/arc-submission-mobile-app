@@ -174,6 +174,34 @@ export const listOpportunities: MobileToolExecutor = (input, context) =>
         ? "requested_chain"
         : "active_chain";
 
+    // A namespace alone cannot tell a testnet from its mainnet: the catalog's
+    // non-EVM rows are mainnet pools keyed only by namespace, so a Solana
+    // Devnet wallet was handed mainnet pools it can never deposit into. EVM
+    // testnets don't hit this, their numeric chain id already pins the exact
+    // network (and the seeded Sepolia rows stay reachable). Read off the
+    // active `Blockchain` row, so no network is named here.
+    const activeRow = context.activeChainCaip2
+      ? context.blockchains.find((b) => b.caip2Id === context.activeChainCaip2)
+      : undefined;
+    if (scopedToActive && activeChainId === undefined && activeRow?.isTestnet) {
+      if (__DEV__) {
+        console.warn("[defi/listOpportunities] testnet without chain id", {
+          activeChain: activeRow.name,
+        });
+      }
+      return {
+        status: "success",
+        data: sanitizeApiResponse({
+          opportunities: [],
+          count: 0,
+          chain_scope: chainScope,
+          active_namespace: activeNamespace,
+          active_chain_id: null,
+          active_chain_name: activeRow.name,
+        }),
+      };
+    }
+
     if (__DEV__) {
       console.warn("[defi/listOpportunities] ENTER", {
         tier,

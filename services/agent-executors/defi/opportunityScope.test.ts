@@ -179,4 +179,77 @@ describe("listOpportunities chain scope", () => {
       namespace: "stellar",
     });
   });
+
+  describe("testnet chains without a numeric chain id", () => {
+    // Data, not names: the rows differ only in `isTestnet`, and the active
+    // chain is identified by CAIP-2 the way AgentMode resolves it.
+    const blockchains = [
+      {
+        id: "s1",
+        name: "Mainnet X",
+        chainId: null,
+        caip2Id: "x:main",
+        isTestnet: false,
+      },
+      {
+        id: "s2",
+        name: "Testnet X",
+        chainId: null,
+        caip2Id: "x:test",
+        isTestnet: true,
+      },
+      {
+        id: "e1",
+        name: "Testnet EVM",
+        chainId: 84532,
+        caip2Id: "eip155:84532",
+        isTestnet: true,
+      },
+    ];
+    const ctx = (namespace: string, caip2: string, activeChainId?: number) =>
+      ({
+        ...ctxOn(namespace, activeChainId),
+        blockchains,
+        activeChainCaip2: caip2,
+      }) as unknown as ExecutorContext;
+
+    it("returns an empty list instead of the namespace's mainnet pools", async () => {
+      h.getOpportunities.mockResolvedValue([row("solana")]);
+
+      const result = await listOpportunities({}, ctx("solana", "x:test"));
+
+      expect(h.getOpportunities).not.toHaveBeenCalled();
+      expect(resultData(result).opportunities).toEqual([]);
+      expect(resultData(result).chain_scope).toBe("active_chain");
+      expect(resultData(result).active_chain_name).toBe("Testnet X");
+    });
+
+    it("still queries on the mainnet row of the same namespace", async () => {
+      h.getOpportunities.mockResolvedValue([row("solana")]);
+
+      await listOpportunities({}, ctx("solana", "x:main"));
+
+      expect(h.getOpportunities.mock.calls[0][0]).toMatchObject({
+        namespace: "solana",
+      });
+    });
+
+    it("leaves EVM testnets on their chain id, so seeded testnet pools stay reachable", async () => {
+      h.getOpportunities.mockResolvedValue([row("eip155")]);
+
+      await listOpportunities({}, ctx("eip155", "eip155:84532", 84532));
+
+      expect(h.getOpportunities.mock.calls[0][0]).toMatchObject({
+        chain_id: 84532,
+      });
+    });
+
+    it('keeps the "every chain" escape hatch open on a testnet', async () => {
+      h.getOpportunities.mockResolvedValue([row("solana")]);
+
+      await listOpportunities({ namespace: "all" }, ctx("solana", "x:test"));
+
+      expect(h.getOpportunities).toHaveBeenCalledTimes(1);
+    });
+  });
 });
