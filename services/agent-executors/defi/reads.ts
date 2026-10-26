@@ -101,11 +101,12 @@ function shapePosition(p: TStrategyPosition) {
 const ALL_CHAINS = "all";
 
 /**
- * Does the user's own message ask beyond their active chain? Unknown (no
- * message threaded through) keeps the old behaviour and allows it.
+ * Does the user's own message ask beyond their active chain? Unknown means
+ * no: the active chain is the safe default, and a widened list must come
+ * from the user's words.
  */
 export function userAskedForEveryChain(text: string | undefined): boolean {
-  if (text === undefined) return true;
+  if (!text) return false;
   return /\b(all|every|other|any|across|different|multiple|more)\b[^.?!]{0,40}\b(chains?|networks?)\b|\bcross[- ]?chain\b|\beverywhere\b|\bon any chain\b/i.test(
     text,
   );

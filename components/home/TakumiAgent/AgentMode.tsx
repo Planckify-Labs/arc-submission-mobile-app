@@ -82,6 +82,7 @@ import {
   type WalletContext,
 } from "@/services/agentSession";
 import { track } from "@/services/analytics/posthog";
+import { bindRouteSafetyChains } from "@/services/defi/safety/routeChainResolver";
 import { pendingTxStore } from "@/services/pendingTxStore";
 import {
   getPermissionGrantStore,
@@ -439,6 +440,15 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
     [activeWallet],
   );
 
+  // Bind the device safety provider to the API's chains as soon as they are
+  // known. It used to be bound only inside the deposit/bridge executors, so
+  // the approval card (which reads exit terms BEFORE any executor runs) had
+  // no chain client and told every ERC-4626 deposit "We couldn't confirm how
+  // long your money would be locked here" (Morpho on Arc, 2026-10-26).
+  useEffect(() => {
+    bindRouteSafetyChains(blockchains);
+  }, [blockchains]);
+
   // The user's own latest words, for executors that must tell a scope the
   // user asked for from one the model picked (see ExecutorContext).
   const lastUserMessage = useMemo(() => {
@@ -710,6 +720,11 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
     sessionIdRef.current = null;
     currentAssistantIdRef.current = null;
     lastUserMessageRef.current = "";
+    // A new chat opens yield results as the Quick Invest card again. "Browse
+    // all" stays sticky WITHIN a chat (for checking pools one by one), but it
+    // used to stick for the whole app session, so every later chat showed the
+    // long list instead of the card.
+    queryClient.setQueryData(["defi", "opportunity-view-mode"], "quick");
     pendingTxStore.clear();
     // Drop the agent-mode integration slot's idempotency cache + any
     // pending intent-paid event so a fresh conversation doesn't
@@ -725,7 +740,7 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
     setNonRetryableError(null);
     setActiveConversationId(null);
     connection.clear();
-  }, [rejectOpenPrompts, mintIntentTool, connection]);
+  }, [rejectOpenPrompts, mintIntentTool, connection, queryClient]);
 
   // ── Intent-paid event subscription (task 46) ──────────────────────
   // When the wallet finishes paying an intent the agent minted, the
@@ -1285,7 +1300,10 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
         // Server-side schema accepts `{role, content}` ModelMessages.
         messages: [{ role: "user", content: trimmed }],
         conversation_id: activeConversationId ?? undefined,
-        executorContext,
+        // This turn's text, not the memoised context's: that one was built
+        // before this message reached state, so it carries the PREVIOUS
+        // message (or none on a first turn).
+        executorContext: { ...executorContext, lastUserMessage: trimmed },
         connectedWallet,
         ui: buildUiBindings(assistantMessage.id),
       });
@@ -1309,7 +1327,7 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
             wallet_context: sendWalletContext,
             messages: [{ role: "user", content: trimmed }],
             conversation_id: undefined,
-            executorContext,
+            executorContext: { ...executorContext, lastUserMessage: trimmed },
             connectedWallet,
             ui: buildUiBindings(assistantMessage.id),
           });

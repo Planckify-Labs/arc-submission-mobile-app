@@ -23,8 +23,15 @@ import { listOpportunities } from "./reads";
 
 type Query = Record<string, unknown>;
 
-const ctxOn = (namespace: string, activeChainId?: number) =>
+const ASKED_EVERY_CHAIN = "show me options on every chain";
+
+const ctxOn = (
+  namespace: string,
+  activeChainId?: number,
+  lastUserMessage?: string,
+) =>
   ({
+    lastUserMessage,
     wallet: { namespace, address: "0xabc" },
     account: null,
     blockchains: [
@@ -140,7 +147,7 @@ describe("listOpportunities chain scope", () => {
 
     const result = await listOpportunities(
       { namespace: "all" },
-      ctxOn("eip155", 8453),
+      ctxOn("eip155", 8453, ASKED_EVERY_CHAIN),
     );
 
     const query = h.getOpportunities.mock.calls[0][0] as Query;
@@ -187,7 +194,7 @@ describe("listOpportunities chain scope", () => {
     // copied from the wallet context. Forwarding the 0 hid every EVM chain.
     const result = await listOpportunities(
       { namespace: "all", chain_id: 0 },
-      ctxOn("eip155", 8453),
+      ctxOn("eip155", 8453, ASKED_EVERY_CHAIN),
     );
 
     const query = h.getOpportunities.mock.calls[0][0] as Query;
@@ -291,6 +298,7 @@ describe("listOpportunities chain scope", () => {
         ...ctxOn(namespace, activeChainId),
         blockchains,
         activeChainCaip2: caip2,
+        lastUserMessage: ASKED_EVERY_CHAIN,
       }) as unknown as ExecutorContext;
 
     it("returns an empty list instead of the namespace's mainnet pools", async () => {
