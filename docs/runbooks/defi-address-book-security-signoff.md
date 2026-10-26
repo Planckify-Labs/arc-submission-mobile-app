@@ -1297,8 +1297,11 @@ human comparison.
 |---|---|---|---|---|
 | `AAVE_V3_POOLS` (api `address-book/lending.ts`) | Monad (143) | `0x69a5F9AD4f96ebf0a0C792dD42a01cC5C0102fef` | `bgd-labs/aave-address-book` `src/AaveV3Monad.sol` (`POOL`, `POOL_ADDRESSES_PROVIDER` `0x34793Fb9935F7bB5E5aE920fb963F39063E7A615`) | Pool has code; `Pool.ADDRESSES_PROVIDER()` is the book's provider; `provider.getPool()` is this Pool; `provider.getMarketId()` = "Aave V3 Monad"; all 11 aave-v3 Monad pools in DeFiLlama's feed have their asset in `getReservesList()` (14 reserves) |
 
-Not pinned under the waiver, because no reviewed shape exists for them yet:
-Aave v4 (Arc, Avalanche, Ethereum; hub-and-spoke, a new execution kind) and
+| `AAVE_V4_TOKENIZATION_SPOKES` (api `address-book/vaults.ts`) | Ethereum (36), Avalanche (7), Arc (4), Base (1) | 48 TokenizationSpokes, listed in the file | `bgd-labs/aave-address-book` `src/AaveV4{Ethereum,Avalanche,Arc,Base}.sol` (`*_TOKENIZATION_SPOKE`, `*_HUB`) | Every spoke's `hub()` equals the hub its constant names and `asset()` is the recorded underlying (read 2026-10-26); the resolver re-proves both on every resolve, and the ERC-4626 checks (exit cost, holder exit, cooldown, gates, non-empty vault) run on each |
+
+Aave v4 executes through those TokenizationSpokes (Aave's own ERC-4626 wrapper
+per hub asset), so it needed no new execution kind. Still not pinned under the
+waiver, because no reviewed shape exists for them yet:
 Morpho Blue direct markets on Arc (the oracle-provenance gate needs reviewed
 feeds per chain). Morpho Vault V2s on Arc need no pin: per-vault addresses come
 from Morpho's own API and must pass Layer-1 identity, the TVL band, the exit
