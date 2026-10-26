@@ -221,6 +221,45 @@ describe("listOpportunities chain scope", () => {
     expect(resultData(result).active_chain_name).toBe("Base");
   });
 
+  describe("\"every chain\" is the user's call, not the model's", () => {
+    const ctxSaying = (lastUserMessage: string) =>
+      ({
+        ...ctxOn("eip155", 5042),
+        lastUserMessage,
+      }) as unknown as ExecutorContext;
+
+    it("keeps a plain yield request on the active chain even if the model sends all", async () => {
+      h.getOpportunities.mockResolvedValue([row("eip155")]);
+
+      const result = await listOpportunities(
+        { namespace: "all" },
+        ctxSaying("Earn yield on my idle USDC"),
+      );
+
+      expect(h.getOpportunities.mock.calls[0][0]).toMatchObject({
+        namespace: "eip155",
+        chain_id: 5042,
+      });
+      expect(resultData(result).chain_scope).toBe("active_chain");
+    });
+
+    it.each([
+      "Show me yield options across all risk levels and chains, even smaller pools.",
+      "what about other chains?",
+      "show every network",
+      "any cross-chain options?",
+    ])("opens every chain when the user says %j", async (text) => {
+      h.getOpportunities.mockResolvedValue([row("eip155")]);
+
+      const result = await listOpportunities(
+        { namespace: "all" },
+        ctxSaying(text),
+      );
+
+      expect(resultData(result).chain_scope).toBe("all_chains");
+    });
+  });
+
   describe("testnet chains without a numeric chain id", () => {
     // Data, not names: the rows differ only in `isTestnet`, and the active
     // chain is identified by CAIP-2 the way AgentMode resolves it.

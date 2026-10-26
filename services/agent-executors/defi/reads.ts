@@ -101,6 +101,17 @@ function shapePosition(p: TStrategyPosition) {
 const ALL_CHAINS = "all";
 
 /**
+ * Does the user's own message ask beyond their active chain? Unknown (no
+ * message threaded through) keeps the old behaviour and allows it.
+ */
+export function userAskedForEveryChain(text: string | undefined): boolean {
+  if (text === undefined) return true;
+  return /\b(all|every|other|any|across|different|multiple|more)\b[^.?!]{0,40}\b(chains?|networks?)\b|\bcross[- ]?chain\b|\beverywhere\b|\bon any chain\b/i.test(
+    text,
+  );
+}
+
+/**
  * `defi_list_opportunities` — scored, tier-filtered yield catalog.
  *
  * Backend returns the curated list filtered by tier when the user has a
@@ -146,7 +157,14 @@ export const listOpportunities: MobileToolExecutor = (input, context) =>
     const amountUsd = optionalNumber(input, "amount_usd");
 
     const activeNamespace = context.wallet.namespace;
-    const wantsEveryChain = requestedNamespace === ALL_CHAINS;
+    // "Every chain" is the USER's choice, never the model's. The model asked
+    // for it on a plain "earn yield on my idle USDC" (Arc, 2026-10-26) and the
+    // user got Sui and Solana pools instead of their own chain's. Honoured only
+    // when the user's latest message asks for other/all chains, which the
+    // card's "See every yield option" button also sends.
+    const wantsEveryChain =
+      requestedNamespace === ALL_CHAINS &&
+      userAskedForEveryChain(context.lastUserMessage);
     // A chain id is a real chain only when positive. 0 is how the catalog keys
     // its non-EVM rows, and the model copies `chain_id: 0` from the wallet
     // context alongside `namespace: "all"`: forwarding it narrowed "every

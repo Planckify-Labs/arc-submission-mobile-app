@@ -439,6 +439,20 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
     [activeWallet],
   );
 
+  // The user's own latest words, for executors that must tell a scope the
+  // user asked for from one the model picked (see ExecutorContext).
+  const lastUserMessage = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== "user") continue;
+      return m.parts
+        .map((p) => (p.type === "text" ? p.text : ""))
+        .join(" ")
+        .trim();
+    }
+    return undefined;
+  }, [messages]);
+
   const executorContext: ExecutorContext | null = useMemo(() => {
     if (!activeWallet?.address) return null;
     // CAIP-2 for the active chain, asked of the chain's own kit rather than
@@ -455,8 +469,10 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
       wallets,
       activeChainId,
       activeChainCaip2: activeRow?.caip2Id ?? undefined,
+      lastUserMessage,
     };
   }, [
+    lastUserMessage,
     activeWallet,
     evmAccount,
     blockchains,

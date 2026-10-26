@@ -133,6 +133,13 @@ export interface ExecutorContext {
    * a plan must identify its chain in a form that survives leaving EVM.
    */
   activeChainCaip2?: string;
+  /**
+   * Text of the user's latest message. Lets an executor honour a scope the
+   * USER asked for and refuse one the model chose on its own (e.g. "every
+   * chain" in `defi_list_opportunities`). Absent = unknown, and executors
+   * keep their previous behaviour.
+   */
+  lastUserMessage?: string;
 }
 
 /**
