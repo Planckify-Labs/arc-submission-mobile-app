@@ -111,7 +111,11 @@ function destinationOf(
 const ERC4626_ABI = parseAbi([
   "function asset() view returns (address)",
   "function maxDeposit(address receiver) view returns (uint256)",
+  "function receiveSharesGate() view returns (address)",
+  "function sendAssetsGate() view returns (address)",
 ]);
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const COMET_ABI = parseAbi([
   "function baseToken() view returns (address)",
   "function isSupplyPaused() view returns (bool)",
@@ -688,6 +692,23 @@ export const Eip155SafetyProvider: ChainSafetyProvider = {
       "maxDeposit",
       [owner as Address],
     );
+    if (max === 0n) {
+      // Morpho Vault V2 answers 0 from every max* view by design; who may
+      // deposit is decided by its gates. Both deposit-path gates unset means
+      // open to anyone, so 0 here is "no cap information", not "full". The
+      // server's validator applies the same convention (api validation.ts).
+      const [sharesGate, assetsGate] = await Promise.all([
+        probes(ctx.client, target.vault, ERC4626_ABI, "receiveSharesGate"),
+        probes(ctx.client, target.vault, ERC4626_ABI, "sendAssetsGate"),
+      ]);
+      if (
+        typeof sharesGate === "string" &&
+        typeof assetsGate === "string" &&
+        sharesGate.toLowerCase() === ZERO_ADDRESS &&
+        assetsGate.toLowerCase() === ZERO_ADDRESS
+      )
+        return null;
+    }
     return typeof max === "bigint" ? max : null;
   },
 };

@@ -186,6 +186,7 @@ export default defineConfig({
       // the client-side split behind the redesigned opportunity card.
       "services/defi/quickInvest.test.ts",
       "services/defi/safety/safetyPipeline.test.ts",
+      "services/defi/safety/depositCapGates.test.ts",
       "services/defi/safety/routeSafety.test.ts",
       "services/defi/safety/routePipeline.integration.test.ts",
       "services/defi/safety/postexec.test.ts",
