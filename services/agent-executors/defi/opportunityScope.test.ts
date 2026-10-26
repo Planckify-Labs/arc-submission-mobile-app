@@ -180,6 +180,47 @@ describe("listOpportunities chain scope", () => {
     });
   });
 
+  it('never forwards chain_id 0, the non-EVM key, with "every chain"', async () => {
+    h.getOpportunities.mockResolvedValue([row("eip155")]);
+
+    // What the model actually sent on Arc: namespace "all" plus the 0 it
+    // copied from the wallet context. Forwarding the 0 hid every EVM chain.
+    const result = await listOpportunities(
+      { namespace: "all", chain_id: 0 },
+      ctxOn("eip155", 8453),
+    );
+
+    const query = h.getOpportunities.mock.calls[0][0] as Query;
+    expect(query.chain_id).toBeUndefined();
+    expect(query.namespace).toBeUndefined();
+    expect(resultData(result).chain_scope).toBe("all_chains");
+  });
+
+  it("treats a bare chain_id 0 as no chain: the active chain scope applies", async () => {
+    h.getOpportunities.mockResolvedValue([row("eip155")]);
+
+    await listOpportunities({ chain_id: 0 }, ctxOn("eip155", 8453));
+
+    expect(h.getOpportunities.mock.calls[0][0]).toMatchObject({
+      namespace: "eip155",
+      chain_id: 8453,
+    });
+  });
+
+  it("reports the device's active chain whatever the scope", async () => {
+    h.getOpportunities.mockResolvedValue([row("solana")]);
+
+    const result = await listOpportunities(
+      { namespace: "all" },
+      ctxOn("eip155", 8453),
+    );
+
+    // The card names the chain the rows are NOT on ("not on your active Base
+    // chain"); it used to fall back to the family label here.
+    expect(resultData(result).active_chain_id).toBe(8453);
+    expect(resultData(result).active_chain_name).toBe("Base");
+  });
+
   describe("testnet chains without a numeric chain id", () => {
     // Data, not names: the rows differ only in `isTestnet`, and the active
     // chain is identified by CAIP-2 the way AgentMode resolves it.

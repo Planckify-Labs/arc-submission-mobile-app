@@ -141,33 +141,36 @@ export const listOpportunities: MobileToolExecutor = (input, context) =>
   safeExecute(async () => {
     const tier = optionalString(input, "tier");
     const assetSymbol = optionalString(input, "asset_symbol");
-    const chainId = optionalInt(input, "chain_id");
     const requestedNamespace = optionalString(input, "namespace");
     const liquidityProfile = optionalString(input, "liquidity_profile");
     const amountUsd = optionalNumber(input, "amount_usd");
 
     const activeNamespace = context.wallet.namespace;
     const wantsEveryChain = requestedNamespace === ALL_CHAINS;
+    // A chain id is a real chain only when positive. 0 is how the catalog keys
+    // its non-EVM rows, and the model copies `chain_id: 0` from the wallet
+    // context alongside `namespace: "all"`: forwarding it narrowed "every
+    // chain" to Sui/Solana/Stellar only, hiding Arc, Ethereum and Base.
+    // "Every chain" never carries a chain id at all.
+    const rawChainId = optionalInt(input, "chain_id");
+    const chainId =
+      !wantsEveryChain && rawChainId !== undefined && rawChainId > 0
+        ? rawChainId
+        : undefined;
     // An explicit chain_id IS the chain scope; don't stack a namespace on it.
     const wantsOneChainId = chainId !== undefined;
     const scopedToActive = !wantsEveryChain && !wantsOneChainId;
     const namespace = scopedToActive ? activeNamespace : undefined;
-    // Present only for chains with a numeric id (EVM). Pins Base to Base
-    // instead of showing every EVM chain's pools.
-    const activeChainId =
-      scopedToActive && context.activeChainId && context.activeChainId > 0
+    // The device's own active chain, whatever the query's scope: the card
+    // needs it to say which rows are elsewhere ("not on your active Arc
+    // chain"). Numeric ids exist for EVM only.
+    const deviceChainId =
+      context.activeChainId && context.activeChainId > 0
         ? context.activeChainId
         : undefined;
+    // Pins Base to Base instead of showing every EVM chain's pools.
+    const activeChainId = scopedToActive ? deviceChainId : undefined;
     const effectiveChainId = chainId ?? activeChainId;
-    // Name the exact chain for the card's empty state ("No yield options on
-    // Base"). The namespace family label ("EVM") would be wrong now that the
-    // scope is per chain, so prefer the blockchains row and fall back to the
-    // family only when the active chain has no numeric id (non-EVM).
-    const activeChainName =
-      activeChainId !== undefined
-        ? (context.blockchains.find((b) => b.chainId === activeChainId)?.name ??
-          null)
-        : null;
     const chainScope = wantsEveryChain
       ? "all_chains"
       : wantsOneChainId
@@ -183,6 +186,15 @@ export const listOpportunities: MobileToolExecutor = (input, context) =>
     const activeRow = context.activeChainCaip2
       ? context.blockchains.find((b) => b.caip2Id === context.activeChainCaip2)
       : undefined;
+    // Name the device's exact chain for the card ("No yield options on Base",
+    // "not on your active Arc chain"). Without it the card fell back to the
+    // family label and called an Arc wallet "Ethereum".
+    const activeChainName =
+      activeRow?.name ??
+      (deviceChainId !== undefined
+        ? (context.blockchains.find((b) => b.chainId === deviceChainId)?.name ??
+          null)
+        : null);
     if (scopedToActive && activeChainId === undefined && activeRow?.isTestnet) {
       if (__DEV__) {
         console.warn("[defi/listOpportunities] testnet without chain id", {
@@ -283,7 +295,7 @@ export const listOpportunities: MobileToolExecutor = (input, context) =>
           count: opportunities.length,
           chain_scope: chainScope,
           active_namespace: activeNamespace,
-          active_chain_id: activeChainId ?? null,
+          active_chain_id: deviceChainId ?? null,
           active_chain_name: activeChainName,
         }),
       };
