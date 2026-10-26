@@ -199,11 +199,16 @@ function SwapTab() {
           <Pressable
             accessibilityLabel="Switch tokens"
             hitSlop={8}
+            // With no receive token yet, `from` would fall back to the
+            // first token and land on both sides.
+            disabled={!toToken}
             onPress={() => {
               tapFeedback();
               setPicked({ chain: activeCaip2, from: toToken, to: fromToken });
             }}
-            className="h-9 w-9 items-center justify-center rounded-full border border-light-matte-black/10 bg-white"
+            className={`h-9 w-9 items-center justify-center rounded-full border border-light-matte-black/10 bg-white ${
+              toToken ? "" : "opacity-40"
+            }`}
           >
             <ArrowDownUp size={16} color={BRAND_RED} />
           </Pressable>

@@ -237,7 +237,12 @@ function HostedOnrampPage({
       ref={webViewRef}
       key={session.sessionId}
       source={{ uri: hostedPageUrl }}
-      originWhitelist={[pageOrigin]}
+      // `decideHostedNavigation` is the only gate. react-native-webview
+      // checks `originWhitelist` first, without `isTopFrame`, and hands any
+      // miss to `Linking.openURL`: on iOS that pulled the widget's own
+      // iframe out to Safari, and top-frame misses skipped
+      // `externalLinkHosts` on both platforms.
+      originWhitelist={["*"]}
       onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
       onMessage={onMessage}
       onError={onError}
