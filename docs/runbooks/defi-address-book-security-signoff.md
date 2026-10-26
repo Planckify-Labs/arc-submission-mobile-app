@@ -1284,3 +1284,22 @@ not meet the bar. Note that most Solana pins were sourced from
 `igneous-labs/sanctum-lst-list` plus a live `getAccountInfo` cross-check, which
 IS a first-party-plus-corroboration story and should shorten the pass
 considerably — see `add-defi-pool-resolver.md` §14.2.
+
+## 12. Automated-evidence pins (no human countersignature) — 2026-10-26
+
+The owner waived the human countersignature for new pins "for now"
+(2026-10-26). Pins added under that waiver are listed here so a later
+sign-off pass can find and countersign them. Each one carries the automated
+evidence that stood in for the review; none of it replaces §2's second-source
+human comparison.
+
+| Book | Chain | Address | Source | Automated evidence |
+|---|---|---|---|---|
+| `AAVE_V3_POOLS` (api `address-book/lending.ts`) | Monad (143) | `0x69a5F9AD4f96ebf0a0C792dD42a01cC5C0102fef` | `bgd-labs/aave-address-book` `src/AaveV3Monad.sol` (`POOL`, `POOL_ADDRESSES_PROVIDER` `0x34793Fb9935F7bB5E5aE920fb963F39063E7A615`) | Pool has code; `Pool.ADDRESSES_PROVIDER()` is the book's provider; `provider.getPool()` is this Pool; `provider.getMarketId()` = "Aave V3 Monad"; all 11 aave-v3 Monad pools in DeFiLlama's feed have their asset in `getReservesList()` (14 reserves) |
+
+Not pinned under the waiver, because no reviewed shape exists for them yet:
+Aave v4 (Arc, Avalanche, Ethereum; hub-and-spoke, a new execution kind) and
+Morpho Blue direct markets on Arc (the oracle-provenance gate needs reviewed
+feeds per chain). Morpho Vault V2s on Arc need no pin: per-vault addresses come
+from Morpho's own API and must pass Layer-1 identity, the TVL band, the exit
+checks and Morpho's own `listed` flag.
