@@ -401,8 +401,33 @@ export const ExitTermsConsentCheck: SafetyCheck = {
   },
 };
 
+/**
+ * A protocol exploited recently, with the loss not returned (§11 Layer 3).
+ *
+ * The verdict is the server's (`riskSignals.depositBlock`, from the market
+ * API's hacks list at score time), read off the pool row the executor
+ * re-fetches before signing — never from the tool call. It is the automatic
+ * twin of the ops kill switch above and shares its code and its rule:
+ * deposit-only. An exploit is the moment people most need to get OUT, so a
+ * withdraw is never stopped here.
+ */
+export const ProtocolIncidentCheck: SafetyCheck = {
+  id: "protocol-incident",
+  layer: 3,
+  appliesTo: { actions: ["deposit"] },
+  run: async (ctx) =>
+    ctx.riskSignals?.depositBlock
+      ? {
+          ok: false,
+          fail: "family_disabled",
+          detail: `protocol incident: ${ctx.riskSignals.depositBlock}`,
+        }
+      : { ok: true },
+};
+
 export const LAYER3_CHECKS: readonly SafetyCheck[] = [
   FamilyKillSwitchCheck,
+  ProtocolIncidentCheck,
   ChainEnabledCheck,
   UserPolicyCheck,
   ExposureCapCheck,

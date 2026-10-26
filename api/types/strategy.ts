@@ -57,7 +57,28 @@ export interface TOpportunity {
   score: number;
   tier: RiskTier;
   scoredAt: string;
+  /** Exit-side risk read server-side at score time (api
+   *  `market-risk.client.ts`). Null/absent = no signals, never "no risk". */
+  riskSignals?: TRiskSignals | null;
 }
+
+/** Warning codes; the app owns the copy for each (`depositRiskCopy.ts`). */
+export type TRiskWarning =
+  | "recent_exploit"
+  | "past_exploit"
+  | "low_liquidity"
+  | "lst_discount";
+
+export type TRiskSignals = {
+  v: 1;
+  at: string;
+  exploit?: { date: string; lostUsd: number; returnedUsd: number };
+  liquidity?: { availableUsd: number; utilizationBps: number };
+  lstPegBps?: number;
+  /** Set => in-app deposits are refused (Layer 3). Never affects withdraws. */
+  depositBlock: "recent_exploit" | null;
+  warnings: TRiskWarning[];
+};
 
 export interface TStrategyPosition {
   id: string;

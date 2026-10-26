@@ -46,6 +46,8 @@ export type QuickInvestRow = {
   in_app?: boolean;
   /** Outside the user's saved risk tier (see `allocatableRows`). */
   outside_tier?: boolean;
+  /** Recent unreturned exploit: in-app deposits refused (server verdict). */
+  deposit_paused?: boolean;
   apy?: number | string;
   apy_7d_avg?: number | string;
   score?: number;
@@ -119,6 +121,8 @@ export function allocatableRows<TRow extends QuickInvestRow>(
       // it would turn "here is what you're missing" into "here is where I
       // put your money".
       r.outside_tier !== true &&
+      // A paused protocol (recent unreturned exploit) is never allocated to.
+      r.deposit_paused !== true &&
       normalizeSymbol(r.asset_symbol),
   );
 }

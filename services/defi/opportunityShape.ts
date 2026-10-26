@@ -61,7 +61,16 @@ export function shapeOpportunity(o: TOpportunity) {
     //
     // We still expose only the boolean, never an address — the card
     // badges/gates off it and the LLM passes `pool_id`/venue, not a target.
-    in_app: o.depositTarget != null || canBuildWithoutTarget(o.protocolSlug),
+    //
+    // A protocol with a recent unreturned exploit is never in-app, whatever
+    // resolved: the device's Layer-3 check would refuse the deposit anyway,
+    // and an in-app badge on a button that always refuses is a broken button.
+    in_app:
+      o.riskSignals?.depositBlock == null &&
+      (o.depositTarget != null || canBuildWithoutTarget(o.protocolSlug)),
+    deposit_paused: o.riskSignals?.depositBlock != null,
+    // Codes only; the card owns the copy (`depositRiskCopy.ts`).
+    risk_warnings: o.riskSignals?.warnings ?? [],
     // Outside the user's saved risk tier — returned so the card can tell
     // the truth about availability, never so it can deposit into them.
     outside_tier: o.outsideTier === true,

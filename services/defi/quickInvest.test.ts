@@ -256,6 +256,21 @@ describe("allocate (§5.1)", () => {
     expect(resolveTargetAsset(arbitrumUsdt, {})).toBeNull();
   });
 
+  it("never allocates into a protocol paused by a recent exploit", () => {
+    const paused = row({
+      protocol_slug: "yapeswap",
+      asset_symbol: "USDC",
+      score: 99,
+      deposit_paused: true,
+    });
+    const healthy = row({
+      protocol_slug: "aave-v3",
+      asset_symbol: "USDC",
+      score: 50,
+    });
+    expect(allocatableRows([paused, healthy])).toEqual([healthy]);
+  });
+
   it("still allocates the in-tier rows when a payload mixes both", () => {
     const mixed = [
       row({ protocol_slug: "outside", score: 99, outside_tier: true }),

@@ -17,6 +17,7 @@
  */
 
 import type { TBridgeQuote } from "@/api/types/bridge";
+import type { TRiskSignals } from "@/api/types/strategy";
 import type { Namespace } from "@/services/chains/types";
 import type { DefiErrorCode } from "../errors/defiErrors";
 import type {
@@ -305,6 +306,8 @@ export interface SafetyContext {
   /** APY the caller expects, for the drift guard. */
   expectedApy?: number;
   cachedApy?: number;
+  /** Exit-side risk from the re-fetched pool row (server-computed). */
+  riskSignals?: TRiskSignals | null;
   /** Dedup key for the idempotency guard (§11.6 #5). */
   submissionKey?: string;
   /** Withdraw-only: asset symbol, for the hint/position match check. */

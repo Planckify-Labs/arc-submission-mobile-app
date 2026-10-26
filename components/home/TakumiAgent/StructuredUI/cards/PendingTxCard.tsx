@@ -28,6 +28,7 @@ import { recordExitConsent } from "@/services/defi/safety/exitConsent";
 import { exitDelaySeconds } from "@/services/defi/safety/types";
 import {
   depositRiskNotice,
+  riskSignalsNotices,
   useDepositRisk,
 } from "@/services/defi/safety/useDepositRisk";
 import {
@@ -326,10 +327,13 @@ function DepositApprovalGate({
   // leaving, and warning there would only discourage an exit already in motion.
   const isDeposit = !!poolId && !input.position_id;
   const { data: terms } = useExitTerms(isDeposit ? poolId : undefined);
-  const { data: ilExposure } = useDepositRisk(isDeposit ? poolId : undefined);
+  const { data: risk } = useDepositRisk(isDeposit ? poolId : undefined);
   const exitNotice = isDeposit ? exitTermsNotice(terms) : null;
-  const riskNotice = isDeposit ? depositRiskNotice(ilExposure) : null;
-  const notice = [exitNotice, riskNotice].filter(Boolean).join(" ") || null;
+  const riskNotice = isDeposit ? depositRiskNotice(risk?.ilExposure) : null;
+  const signalNotices = isDeposit ? riskSignalsNotices(risk?.riskSignals) : [];
+  const notice =
+    [exitNotice, riskNotice, ...signalNotices].filter(Boolean).join(" ") ||
+    null;
 
   const approve = () => {
     // Record BEFORE handing the turn back, so the executor's Layer-3 read

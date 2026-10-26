@@ -24,6 +24,7 @@ import {
   ExposureCapCheck,
   FamilyKillSwitchCheck,
   LAYER3_CHECKS,
+  ProtocolIncidentCheck,
   SanctionsScreenCheck,
   setCounterpartyDenyList,
   setDefiEnabledChains,
@@ -427,6 +428,32 @@ describe("SafetyAction scoping — withdraw must not inherit deposit-only policy
       }),
     );
     expect(result.ok).toBe(true);
+  });
+
+  it("a recent unreturned exploit refuses a deposit, never a withdraw", async () => {
+    registerSafetyCheck(ProtocolIncidentCheck);
+    const riskSignals = {
+      v: 1 as const,
+      at: "2026-10-26T00:00:00Z",
+      depositBlock: "recent_exploit" as const,
+      warnings: ["recent_exploit" as const],
+    };
+    const deposit = await runSafetyPipeline(
+      ctx({ action: "deposit", riskSignals }),
+    );
+    expect(deposit.ok).toBe(false);
+    if (!deposit.ok) expect(deposit.fail).toBe("family_disabled");
+    const withdraw = await runSafetyPipeline(
+      ctx({ action: "withdraw", riskSignals }),
+    );
+    expect(withdraw.ok).toBe(true);
+    const healthy = await runSafetyPipeline(
+      ctx({
+        action: "deposit",
+        riskSignals: { ...riskSignals, depositBlock: null, warnings: [] },
+      }),
+    );
+    expect(healthy.ok).toBe(true);
   });
 
   it("family kill-switch never blocks a withdraw", async () => {

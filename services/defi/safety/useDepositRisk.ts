@@ -15,12 +15,21 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { strategiesApi } from "@/api/endpoints/strategies";
+import type { TRiskSignals } from "@/api/types/strategy";
 
-export { depositRiskNotice } from "./depositRiskCopy";
+export { depositRiskNotice, riskSignalsNotices } from "./depositRiskCopy";
 
-async function fetchIlExposure(poolId: string): Promise<boolean | undefined> {
+export type TDepositRisk = {
+  ilExposure: boolean | undefined;
+  riskSignals: TRiskSignals | null;
+};
+
+async function fetchDepositRisk(poolId: string): Promise<TDepositRisk> {
   const opportunity = await strategiesApi.getPool(poolId).catch(() => null);
-  return opportunity?.ilExposure;
+  return {
+    ilExposure: opportunity?.ilExposure,
+    riskSignals: opportunity?.riskSignals ?? null,
+  };
 }
 
 /**
@@ -29,7 +38,7 @@ async function fetchIlExposure(poolId: string): Promise<boolean | undefined> {
 export function useDepositRisk(poolId: string | undefined) {
   return useQuery({
     queryKey: ["defi", "deposit-risk", poolId],
-    queryFn: () => fetchIlExposure(poolId as string),
+    queryFn: () => fetchDepositRisk(poolId as string),
     enabled: !!poolId,
     staleTime: 30_000,
     retry: 1,

@@ -660,6 +660,7 @@ export const deposit: MobileToolExecutor = (input, context) =>
         exitDelayAcknowledgedSec: takeExitConsent(poolId),
         expectedApy,
         cachedApy: opportunity ? Number.parseFloat(opportunity.apy) : undefined,
+        riskSignals: opportunity?.riskSignals ?? null,
         policy: {
           tier: strategy ? toTierKey(strategy.tier) : undefined,
           protocolWhitelist: strategy?.protocolWhitelist ?? undefined,
