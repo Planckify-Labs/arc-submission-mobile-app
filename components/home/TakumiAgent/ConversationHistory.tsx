@@ -26,6 +26,7 @@ import {
   useDeleteConversation,
 } from "@/hooks/queries/useConversations";
 import { useWallet } from "@/hooks/useWallet";
+import { inlineSignIn } from "@/services/auth/inlineSignIn";
 import { formatChainLabel } from "@/services/walletKit/chainInfo";
 import { copyToClipboard } from "@/utils/helperUtils";
 
@@ -134,7 +135,11 @@ export default function ConversationHistory({
               to view them here.
             </Text>
             <TouchableOpacity
-              onPress={() => router.push("/auth")}
+              onPress={() => {
+                // Over the chat when the agent hosts it, else the screen.
+                if (inlineSignIn.isAvailable()) void inlineSignIn.request();
+                else router.push("/auth");
+              }}
               className="bg-light-primary-red rounded-full px-6 py-3"
             >
               <Text className="text-white font-semibold text-sm">Sign in</Text>

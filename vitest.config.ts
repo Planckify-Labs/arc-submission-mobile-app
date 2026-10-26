@@ -92,6 +92,8 @@ export default defineConfig({
       "services/unifiedBalance/passState.test.ts",
       // Onramp / Add funds (docs/onramp-app-kit-spec.md §7, §8).
       "services/onramp/onramp.test.ts",
+      // In-place sign-in for the agent chat (store + request_authentication).
+      "services/auth/inlineSignIn.test.ts",
       "services/addFunds/routeForm.test.ts",
       "services/addFunds/transferTracker.test.ts",
       // Sui Intent Engine (Sui Overflow 2026 Phase 1)

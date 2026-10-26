@@ -79,7 +79,7 @@ vi.mock("@/services/walletPresence", () => ({
 import { floorTokens } from "@/services/bridgeRoutes/floorTokens";
 import { resetInFlightSubmissions } from "@/services/defi/safety/checks/layer4-execution";
 import { routeAck, routeAckKey } from "@/services/swap/routeAck";
-import { swapExecute } from "./swap";
+import { swapExecute, swapQuote } from "./swap";
 
 function freshQuote(over: Partial<Record<string, unknown>> = {}): TBridgeQuote {
   return {
@@ -394,6 +394,48 @@ describe("swap_execute through bridge_execute", () => {
     )) as { reason?: string };
     expect(r.reason).toBe("chain_not_enabled");
     expect(getQuote).not.toHaveBeenCalled();
+  });
+
+  it("asks for sign-in, not a retry, when there is no session", async () => {
+    getQuote.mockRejectedValue(
+      new Error("Not authenticated for current wallet"),
+    );
+    const quoted = (await swapQuote(
+      {
+        chain: CHAIN,
+        from_asset: input.from_asset,
+        to_asset: input.to_asset,
+        amount_raw: input.amount_raw,
+      },
+      context,
+    )) as { error?: string };
+    expect(quoted.error).toBe("authentication_required");
+    const r = await run();
+    expect(r.error).toBe("authentication_required");
+    expect(adapterExecute).not.toHaveBeenCalled();
+  });
+
+  it("asks for sign-in when the session expired and refresh failed (401)", async () => {
+    getQuote.mockRejectedValueOnce(
+      Object.assign(
+        new Error("Authentication expired. Please sign in again."),
+        {
+          response: { status: 401, data: {} },
+        },
+      ),
+    );
+    const r = await run();
+    expect(r.error).toBe("authentication_required");
+  });
+
+  it("still calls a backend outage a network error", async () => {
+    getQuote.mockRejectedValueOnce(
+      Object.assign(new Error("HTTP 502"), {
+        response: { status: 502, data: {} },
+      }),
+    );
+    const r = await run();
+    expect(r.error).toBe("network_error");
   });
 
   it("requires the floor the user read", async () => {

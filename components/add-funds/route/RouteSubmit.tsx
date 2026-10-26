@@ -12,6 +12,7 @@ import { Info } from "lucide-react-native";
 import { memo, useCallback, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import type { useRouteQuote } from "@/hooks/addFunds/useRouteQuote";
+import { useGoToAuth } from "@/hooks/useGoToAuth";
 import {
   hasBlockingBlocker,
   routeErrorCopy,
@@ -50,8 +51,12 @@ function RouteSubmit({
   // re-reads `routeAck` (a plain store, not observable).
   const [, setAckTick] = useState(0);
 
+  const { navigatingToAuth, goToAuth } = useGoToAuth();
   const result = quote.result;
   const failed = result?.status === "failed";
+  // The session ended after the tab decided we were signed in: a fresh
+  // quote cannot help, signing in can.
+  const signedOut = failed && result?.error === "authentication_required";
   const data = (
     result?.status === "success" ? result.data : null
   ) as TQuotePayload | null;
@@ -80,15 +85,19 @@ function RouteSubmit({
     ? blockedReason
     : quote.isQuoting && !result
       ? "Getting the best price…"
-      : failed
-        ? "Try again"
-        : !routable
-          ? "Not available"
-          : blocking
-            ? "Destination not ready"
-            : needsConfirm
-              ? "Confirm the note above"
-              : `Review ${verb.toLowerCase()}`;
+      : signedOut
+        ? navigatingToAuth
+          ? "Opening sign-in…"
+          : `Sign in to ${verb.toLowerCase()}`
+        : failed
+          ? "Try again"
+          : !routable
+            ? "Not available"
+            : blocking
+              ? "Destination not ready"
+              : needsConfirm
+                ? "Confirm the note above"
+                : `Review ${verb.toLowerCase()}`;
 
   return (
     <View>
@@ -124,6 +133,10 @@ function RouteSubmit({
         disabled={!ready && !(failed && !blockedReason)}
         onPress={() => {
           tapFeedback();
+          if (signedOut) {
+            void goToAuth();
+            return;
+          }
           if (failed) {
             void quote.refresh();
             return;

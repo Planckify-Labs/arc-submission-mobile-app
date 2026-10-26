@@ -6,14 +6,17 @@
  * user-facing-error rule, raw `output.error` codes stay in dev logs.
  */
 
-import { router } from "expo-router";
-import { AlertTriangle, Briefcase, LogIn, Sparkles } from "lucide-react-native";
+import { AlertTriangle, Briefcase, Sparkles } from "lucide-react-native";
 import type React from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { Text, View } from "react-native";
 import SingleLoadingSekeleton from "@/components/common/SingleLoadingSekeleton";
 import { getChainFamilyLabel } from "@/services/walletKit/chainInfo";
 import type { ToolComponentProps } from "../types";
 import SetupStrategyCTA from "./SetupStrategyCTA";
+import SignInRequiredCard, {
+  AUTH_REQUIRED,
+  continueAfterSignIn,
+} from "./SignInRequiredCard";
 
 const BRAND_RED = "#c71c4b";
 
@@ -229,7 +232,7 @@ function PositionRowItem({ row }: { row: PositionRow }) {
 
 const PositionListCard: React.FC<
   ToolComponentProps<PositionInput, PositionOutput>
-> = ({ state, output, showSetupCTA = true }) => {
+> = ({ state, output, mode, onUserPrompt, showSetupCTA = true }) => {
   if (state === "input-streaming" || state === "input-available" || !output) {
     return (
       <View className="my-1.5 rounded-2xl border border-light-matte-black/10 bg-white px-3.5 py-3">
@@ -254,28 +257,13 @@ const PositionListCard: React.FC<
     if (__DEV__ && output.error) {
       console.warn("[PositionListCard] tool result failed:", output.error);
     }
-    if (output.error === "authentication_required") {
+    if (output.error === AUTH_REQUIRED) {
       return (
-        <View className="my-1.5 rounded-2xl border border-light-matte-black/10 bg-white px-3.5 py-4">
-          <View className="flex-row items-center gap-2 mb-2">
-            <View className="w-8 h-8 rounded-full bg-light-primary-red/10 items-center justify-center">
-              <LogIn size={16} color={BRAND_RED} />
-            </View>
-            <Text className="text-sm font-semibold text-light-matte-black">
-              Sign in to view your positions
-            </Text>
-          </View>
-          <Text className="text-sm text-light-matte-black/70 mb-3">
-            Sign in to track your DeFi positions, returns, and goals across
-            chains.
-          </Text>
-          <TouchableOpacity
-            onPress={() => router.push("/auth")}
-            className="bg-light-primary-red rounded-full px-5 py-2.5 self-start"
-          >
-            <Text className="text-white font-semibold text-sm">Sign in</Text>
-          </TouchableOpacity>
-        </View>
+        <SignInRequiredCard
+          onSignedIn={continueAfterSignIn(mode, onUserPrompt)}
+          title="Sign in to view your positions"
+          body="Sign in to track your DeFi positions, returns, and goals across chains."
+        />
       );
     }
     return (

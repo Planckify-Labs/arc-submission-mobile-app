@@ -86,6 +86,10 @@ import {
   truncateAddress,
 } from "./bridgeFormat";
 import { ChainIcon } from "./ChainIcon";
+import SignInRequiredCard, {
+  AUTH_REQUIRED,
+  continueAfterSignIn,
+} from "./SignInRequiredCard";
 
 function resolveExplorerTxUrl(
   caip2: string | undefined,
@@ -623,6 +627,23 @@ const BridgeProgressCard: React.FC<
   // ahead of the no-result branch: an executor failure posts `error` on
   // the part, and may post no output either.
   if (state === "output-error" || output?.status === "failed") {
+    if (toolError === AUTH_REQUIRED) {
+      // Execute calls carry `amount_raw`; their only backend call is the
+      // pre-sign re-quote, so nothing was sent.
+      return input?.amount_raw ? (
+        <SignInRequiredCard
+          onSignedIn={continueAfterSignIn(mode, onUserPrompt)}
+          title="Sign in to continue"
+          body="You were signed out before this was sent, so nothing moved. Sign in, then ask again."
+        />
+      ) : (
+        <SignInRequiredCard
+          onSignedIn={continueAfterSignIn(mode, onUserPrompt)}
+          title="Sign in to see progress"
+          body="Sign in to check on this transfer. Your funds aren't affected."
+        />
+      );
+    }
     return (
       <View className="my-1.5 rounded-2xl border border-light-primary-red/30 bg-light-primary-red/5 px-4 py-3.5">
         <View className="flex-row items-center gap-2">

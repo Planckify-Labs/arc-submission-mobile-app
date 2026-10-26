@@ -134,6 +134,25 @@ describe("swap_find_token", () => {
     ]);
   });
 
+  it("asks for sign-in when the provider search runs signed out", async () => {
+    searchTokens.mockRejectedValueOnce(
+      Object.assign(
+        new Error("Authentication expired. Please sign in again."),
+        {
+          response: { status: 401, data: {} },
+        },
+      ),
+    );
+    const r = (await swapFindToken(
+      { chain: "eip155:5042", query: "cirBTC" },
+      context,
+    )) as { status: string; error?: string };
+    expect(r).toMatchObject({
+      status: "failed",
+      error: "authentication_required",
+    });
+  });
+
   it("prefers our own rows, and marks them verified", async () => {
     searchTokens.mockClear();
     const { data } = await find("eip155:5042", "USDC");

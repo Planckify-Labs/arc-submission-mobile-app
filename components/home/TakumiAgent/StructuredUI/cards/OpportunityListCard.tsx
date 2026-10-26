@@ -47,7 +47,6 @@ import {
   ChevronRight,
   Coins,
   ExternalLink,
-  LogIn,
   Plus,
   Search,
   ShieldCheck,
@@ -93,6 +92,10 @@ import type { ToolComponentProps } from "../types";
 import OpportunityQuickInvestCard from "./OpportunityQuickInvestCard";
 import PagerButton from "./PagerButton";
 import SetupStrategyCTA from "./SetupStrategyCTA";
+import SignInRequiredCard, {
+  AUTH_REQUIRED,
+  continueAfterSignIn,
+} from "./SignInRequiredCard";
 
 const BRAND_RED = "#c71c4b";
 const PREVIEW_COUNT = 6;
@@ -599,7 +602,7 @@ function GroupCard({
 
 const OpportunityListCard: React.FC<
   ToolComponentProps<OpportunityInput, OpportunityOutput>
-> = ({ state, input, output, onUserPrompt, showSetupCTA = true }) => {
+> = ({ state, input, output, mode, onUserPrompt, showSetupCTA = true }) => {
   const { data: strategy } = useUserStrategy();
   const { wallets } = useWallet();
   const { promptFor, sheet: addWalletSheet } = useAddWalletPrompt();
@@ -807,28 +810,13 @@ const OpportunityListCard: React.FC<
     if (__DEV__ && output.error) {
       console.warn("[OpportunityListCard] tool result failed:", output.error);
     }
-    if (output.error === "authentication_required") {
+    if (output.error === AUTH_REQUIRED) {
       return (
-        <View className="my-1.5 rounded-2xl border border-light-matte-black/10 bg-white px-3.5 py-4">
-          <View className="flex-row items-center gap-2 mb-2">
-            <View className="w-8 h-8 rounded-full bg-light-primary-red/10 items-center justify-center">
-              <LogIn size={16} color={BRAND_RED} />
-            </View>
-            <Text className="text-sm font-semibold text-light-matte-black">
-              Sign in to explore DeFi
-            </Text>
-          </View>
-          <Text className="text-sm text-light-matte-black/70 mb-3">
-            Sign in to see real-time yield opportunities tailored to your
-            wallet&apos;s risk profile.
-          </Text>
-          <TouchableOpacity
-            onPress={() => router.push("/auth")}
-            className="bg-light-primary-red rounded-full px-5 py-2.5 self-start"
-          >
-            <Text className="text-white font-semibold text-sm">Sign in</Text>
-          </TouchableOpacity>
-        </View>
+        <SignInRequiredCard
+          onSignedIn={continueAfterSignIn(mode, onUserPrompt)}
+          title="Sign in to explore DeFi"
+          body="Sign in to see real-time yield opportunities tailored to your wallet's risk profile."
+        />
       );
     }
     return (

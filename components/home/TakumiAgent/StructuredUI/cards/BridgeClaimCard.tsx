@@ -28,6 +28,10 @@ import {
   declinedBridgeCopy,
   truncateAddress,
 } from "./bridgeFormat";
+import SignInRequiredCard, {
+  AUTH_REQUIRED,
+  continueAfterSignIn,
+} from "./SignInRequiredCard";
 
 const BRAND_RED = "#c71c4b";
 const MUTED = "#6b7280";
@@ -61,6 +65,7 @@ const BridgeClaimCard: React.FC<
   output,
   error,
   mode,
+  onUserPrompt,
   addToolResult,
   decision,
   onRequestApproval,
@@ -89,6 +94,15 @@ const BridgeClaimCard: React.FC<
   }
 
   if (state === "output-error" || output?.status === "failed") {
+    if (toolError === AUTH_REQUIRED) {
+      return (
+        <SignInRequiredCard
+          onSignedIn={continueAfterSignIn(mode, onUserPrompt)}
+          title="Sign in to receive"
+          body={`Sign in to receive these funds. They stay safe on ${destination} until you do.`}
+        />
+      );
+    }
     return (
       <View className="my-1.5 rounded-2xl border border-light-primary-red/30 bg-light-primary-red/5 px-4 py-3.5">
         <View className="flex-row items-center gap-2">

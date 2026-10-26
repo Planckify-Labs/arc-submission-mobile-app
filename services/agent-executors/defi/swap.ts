@@ -32,6 +32,7 @@ import type { Namespace } from "@/services/chains/types";
 import { foldSymbol } from "@/services/swap/routeAck";
 import { addressesEqual } from "@/services/walletKit/chainInfo";
 import {
+  backendCallError,
   type ExecutorContext,
   ExecutorError,
   ExecutorErrorCode,
@@ -251,7 +252,7 @@ export const swapFindToken: MobileToolExecutor = (input, context) =>
       found = await bridgeApi.searchTokens(chain, query);
     } catch (err) {
       if (__DEV__) console.warn("[swap/findToken] provider search failed", err);
-      throw new ExecutorError(ExecutorErrorCode.NetworkError);
+      throw backendCallError(err);
     }
     return {
       status: "success" as const,

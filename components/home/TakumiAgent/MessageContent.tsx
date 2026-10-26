@@ -10,6 +10,10 @@ import {
 } from "./StructuredUI";
 import { computeSuppressedBridgePartsInMessage } from "./StructuredUI/bridgeDedupe";
 import { normalizeWalletBalancesOutput } from "./StructuredUI/cards/BalancesCard";
+import SignInRequiredCard, {
+  AUTH_REQUIRED,
+  continueAfterSignIn,
+} from "./StructuredUI/cards/SignInRequiredCard";
 import { consolidateToolParts } from "./StructuredUI/mergeToolParts";
 import { useOriginAgentDisplay } from "./useOriginAgentDisplay";
 
@@ -240,7 +244,20 @@ const MessageContent: React.FC<MessageContentProps> = React.memo(
 
             if (part.type === "tool") {
               const Component = toolComponents[part.toolName];
-              if (!Component) return null;
+              if (!Component) {
+                // A card-less tool (e.g. `swap_find_token`) that failed
+                // signed out still needs the Sign in button the agent's
+                // reply points at.
+                const failed = part.output as { error?: string } | undefined;
+                return (failed?.error ?? part.error) === AUTH_REQUIRED ? (
+                  <SignInRequiredCard
+                    key={part.toolCallId}
+                    onSignedIn={continueAfterSignIn(mode, onUserPrompt)}
+                    title="Sign in to continue"
+                    body="Sign in so Takumi can finish this for you."
+                  />
+                ) : null;
+              }
               if (suppressedBalanceParts.has(part.toolCallId)) return null;
               if (suppressedRetryParts.has(part.toolCallId)) return null;
               if (consolidated.suppressed.has(part.toolCallId)) return null;

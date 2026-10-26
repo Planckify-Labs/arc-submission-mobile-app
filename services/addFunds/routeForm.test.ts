@@ -230,6 +230,10 @@ describe("route copy", () => {
       expect(copy).not.toMatch(/\b(let me|I )\b/i);
     }
     expect(routeErrorCopy(undefined, undefined)).toMatch(/nothing was sent/);
+    // Signed out: point at signing in, never at "the network is busy".
+    expect(routeErrorCopy("authentication_required", undefined)).toMatch(
+      /Sign in/,
+    );
     expect(isRequoteReason("quote_stale")).toBe(true);
     expect(isRequoteReason("quote_expired")).toBe(true);
     expect(isRequoteReason("floor_not_met")).toBe(true);

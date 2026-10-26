@@ -20,6 +20,7 @@
 
 import { router } from "expo-router";
 import { type Abi, formatUnits } from "viem";
+import { inlineSignIn } from "@/services/auth/inlineSignIn";
 import { resolveChainClients } from "../chainRouter";
 import { checkPointsAuth } from "../pointsAuth";
 import {
@@ -177,8 +178,9 @@ async function sleep(ms: number): Promise<void> {
 
 /**
  * `request_authentication` — bring the user through the existing SIWE
- * login screen at `/auth`, then poll secure storage for a successfully
- * stored access token bound to the active wallet.
+ * login flow: as sheets over the agent chat when it hosts them
+ * (`inlineSignIn`), otherwise the `/auth` screen, then poll secure storage
+ * for a successfully stored access token bound to the active wallet.
  *
  * This executor is intentionally UI-interactive: it pushes the user to
  * the login route and then awaits the outcome via secure-storage
@@ -221,6 +223,26 @@ export const requestAuthentication: MobileToolExecutor = async (
   const alreadyAuthed = await checkPointsAuth(walletAddress);
   if (alreadyAuthed) {
     return { status: "success", data: { success: true } };
+  }
+
+  // Inside the agent chat the same flow runs as sheets over it: the
+  // outcome is known the moment the user signs in or closes them, so
+  // nothing polls and the chat never leaves the screen.
+  if (inlineSignIn.isAvailable()) {
+    const outcome = await Promise.race([
+      inlineSignIn.request(),
+      sleep(AUTH_WAIT_TIMEOUT_MS).then(() => "cancelled" as const),
+    ]);
+    // Secure storage stays the source of truth for "signed in".
+    const authed = await checkPointsAuth(walletAddress).catch(() => false);
+    if (authed) return { status: "success", data: { success: true } };
+    return {
+      status: "success",
+      data: {
+        success: false,
+        error: outcome === "failed" ? "network_error" : "user_cancelled",
+      },
+    };
   }
 
   try {

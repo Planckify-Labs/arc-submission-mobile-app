@@ -35,6 +35,7 @@ import {
   type GrantChoice,
   specialWarning,
 } from "@/components/agent/ApprovalSheet";
+import InlineSignInHost from "@/components/auth/InlineSignInHost";
 import { ThinkingEdges } from "@/components/common/ThinkingEdges";
 import { ThinkingOrb } from "@/components/common/ThinkingOrb";
 import { approvalSummaryFromToolInput } from "@/components/home/TakumiAgent/StructuredUI/approvalSummary";
@@ -1949,6 +1950,9 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
             onReject={handleApprovalReject}
           />
         ) : null}
+
+        {/* Sign-in a card or tool asks for runs here, over the chat. */}
+        <InlineSignInHost enabled={isActive} />
 
         {!isOnboardingLoading && (
           <AgentOnboarding

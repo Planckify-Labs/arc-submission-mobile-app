@@ -67,6 +67,10 @@ import {
   UnverifiedTokenNotice,
   WARN_AMBER,
 } from "./routeCardParts";
+import SignInRequiredCard, {
+  AUTH_REQUIRED,
+  continueAfterSignIn,
+} from "./SignInRequiredCard";
 
 const GOOD_GREEN = "#059669";
 
@@ -168,7 +172,7 @@ function stepSource(data: RoutablePayload): TBridgeQuote {
 
 export const SwapQuoteCard: React.FC<
   ToolComponentProps<SwapQuoteInput, SwapQuoteOutput>
-> = ({ state, input, output, mode = "live" }) => {
+> = ({ state, input, output, mode = "live", onUserPrompt }) => {
   const [expanded, setExpanded] = useState(false);
   // Subscribing keeps the protection row in step with the setting.
   const { mevEnabled } = useMevProtection();
@@ -207,6 +211,15 @@ export const SwapQuoteCard: React.FC<
 
   // Genuine failure. Curated copy only (CLAUDE.md user-facing errors).
   if (state === "output-error" || output.status === "failed") {
+    if (output.error === AUTH_REQUIRED) {
+      return (
+        <SignInRequiredCard
+          onSignedIn={continueAfterSignIn(mode, onUserPrompt)}
+          title="Sign in to swap"
+          body="Sign in to see prices and swap from this wallet."
+        />
+      );
+    }
     return (
       <Shell>
         <View className="flex-row items-center gap-2">

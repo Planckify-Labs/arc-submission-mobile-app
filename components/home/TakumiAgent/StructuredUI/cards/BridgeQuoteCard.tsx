@@ -98,6 +98,10 @@ import {
   UnverifiedTokenNotice,
   WARN_AMBER,
 } from "./routeCardParts";
+import SignInRequiredCard, {
+  AUTH_REQUIRED,
+  continueAfterSignIn,
+} from "./SignInRequiredCard";
 
 type BridgeQuoteInput = {
   from_chain?: string;
@@ -655,6 +659,15 @@ const BridgeQuoteCard: React.FC<
   // Genuine failure. Curated copy only; the raw `error`/`reason` codes
   // never reach the user (CLAUDE.md user-facing errors).
   if ((state === "output-error" || output.status === "failed") && !quote) {
+    if (output.error === AUTH_REQUIRED) {
+      return (
+        <SignInRequiredCard
+          onSignedIn={continueAfterSignIn(mode, onUserPrompt)}
+          title="Sign in to bridge"
+          body="Sign in to see routes and move funds from this wallet."
+        />
+      );
+    }
     return (
       <Shell>
         <View className="flex-row items-center gap-2">

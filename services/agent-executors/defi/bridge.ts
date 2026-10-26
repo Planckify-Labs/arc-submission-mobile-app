@@ -68,6 +68,7 @@ import { walletKitRegistry } from "@/services/walletKit/registry";
 import type { BridgeExecutionPayload } from "@/services/walletKit/types";
 import { getWalletForNamespace } from "@/services/walletPresence";
 import {
+  backendCallError,
   type ExecutorContext,
   ExecutorError,
   ExecutorErrorCode,
@@ -369,7 +370,7 @@ export const bridgeGetSupport: MobileToolExecutor = () =>
       if (__DEV__) {
         console.warn("[bridge/getSupport] failed", err);
       }
-      throw new ExecutorError(ExecutorErrorCode.NetworkError);
+      throw backendCallError(err);
     }
   });
 
@@ -418,7 +419,7 @@ export const bridgeQuote: MobileToolExecutor = (input, context) =>
       if (__DEV__) {
         console.warn("[bridge/quote] request failed", err);
       }
-      throw new ExecutorError(ExecutorErrorCode.NetworkError);
+      throw backendCallError(err);
     }
 
     if (!result.routable) return noRoutePayload(result);
@@ -627,7 +628,7 @@ export const bridgeExecute: MobileToolExecutor = (input, context) =>
       if (__DEV__) {
         console.error("[bridge/execute] re-quote request failed:", err);
       }
-      throw new ExecutorError(ExecutorErrorCode.NetworkError);
+      throw backendCallError(err);
     }
 
     if (!result.routable) {
@@ -1261,7 +1262,7 @@ export const bridgeStatus: MobileToolExecutor = (input) =>
       if (__DEV__) {
         console.warn("[bridge/status] failed", err);
       }
-      throw new ExecutorError(ExecutorErrorCode.NetworkError);
+      throw backendCallError(err);
     }
   });
 
@@ -1299,7 +1300,7 @@ export const bridgeClaim: MobileToolExecutor = (input, context) =>
         if (typeof __DEV__ !== "undefined" && __DEV__) {
           console.warn("[bridge/claim] status failed", err);
         }
-        throw new ExecutorError(ExecutorErrorCode.NetworkError);
+        throw backendCallError(err);
       }
     };
 

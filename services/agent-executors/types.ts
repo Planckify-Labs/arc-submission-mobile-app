@@ -33,6 +33,7 @@
 import type { Account, PublicClient, WalletClient } from "viem";
 import type { TBlockchain } from "@/api/types/blockchain";
 import type { TWallet } from "@/constants/types/walletTypes";
+import { classifyPointsError } from "./utils";
 
 /**
  * Outcome shape every executor must return. Mirrors the spec in
@@ -180,6 +181,10 @@ export const ExecutorErrorCode = {
   // New protocols map their "the world moved between prepare and execute"
   // failures onto this instead of inventing a fresh top-level code.
   StalePrecondition: "stale_precondition",
+  // The active wallet has no TakumiPay session (no token, or a 401 the
+  // silent refresh could not fix). The card offers Sign in; a retry can
+  // never succeed signed out. Same code the points executors already use.
+  AuthenticationRequired: "authentication_required",
   // Catch-all curated code. Never surface raw runtime / response text
   // on `ToolResult.error` — that string ends up in LLM context on the
   // next turn (CLAUDE.md user-facing-error rule). `mapUnknownError`
@@ -201,6 +206,20 @@ export class ExecutorError extends Error {
     this.code = code;
     this.name = "ExecutorError";
   }
+}
+
+/**
+ * The error for a failed TakumiPay API call (`bridgeApi` and friends):
+ * `authentication_required` when the wallet is not signed in, otherwise
+ * `network_error`. Signed out, "the network is busy, try again" sends the
+ * user (and the agent) into a retry that cannot work.
+ */
+export function backendCallError(err: unknown): ExecutorError {
+  return new ExecutorError(
+    classifyPointsError(err) === "authentication_required"
+      ? ExecutorErrorCode.AuthenticationRequired
+      : ExecutorErrorCode.NetworkError,
+  );
 }
 
 /**

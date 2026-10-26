@@ -41,6 +41,7 @@ import { getDefaultTokens } from "@/services/tokens/tokenList";
 import { walletKitRegistry } from "@/services/walletKit/registry";
 import { getWalletForNamespace } from "@/services/walletPresence";
 import {
+  backendCallError,
   type ExecutorContext,
   ExecutorError,
   ExecutorErrorCode,
@@ -265,6 +266,10 @@ export const crossChainDeposit: MobileToolExecutor = (input, context) =>
         if (__DEV__) {
           console.warn("[defi/crossChainDeposit] quote request failed", err);
         }
+        const failure = backendCallError(err);
+        if (failure.code === ExecutorErrorCode.AuthenticationRequired) {
+          throw failure;
+        }
         throw new DefiError("network_error");
       }
 
@@ -347,6 +352,14 @@ export const crossChainDeposit: MobileToolExecutor = (input, context) =>
         },
       };
     } catch (err) {
+      // Signed out is not a bad request: keep the code the card offers
+      // Sign in for.
+      if (
+        err instanceof ExecutorError &&
+        err.code === ExecutorErrorCode.AuthenticationRequired
+      ) {
+        throw err;
+      }
       const code = classifyCrossChainError(err);
       if (__DEV__) {
         console.warn("[defi/crossChainDeposit] EXIT failed", {

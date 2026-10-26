@@ -215,6 +215,8 @@ const ROUTE_COPY: Record<string, string> = {
   wallet_type_cannot_execute:
     "This wallet can't sign this kind of transaction.",
   network_error: "The network is busy right now. Please try again in a moment.",
+  authentication_required:
+    "You were signed out, so nothing was sent. Sign in and try again.",
 };
 
 export function routeErrorCopy(
