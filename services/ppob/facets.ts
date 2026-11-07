@@ -191,7 +191,10 @@ function percentile(sorted: number[], p: number): number {
   return sorted[idx];
 }
 
-function buildPriceOptions(prices: number[]): PpobFacetOption[] {
+function buildPriceOptions(
+  prices: number[],
+  formatPrice?: (price: number) => string | null,
+): PpobFacetOption[] {
   const clean = prices
     .filter((p): p is number => p != null)
     .sort((a, b) => a - b);
@@ -204,7 +207,9 @@ function buildPriceOptions(prices: number[]): PpobFacetOption[] {
     .sort((a, b) => a - b);
   if (cuts.length < 2) return [];
 
-  const fmt = (n: number) => n.toLocaleString();
+  // No label means no rate yet: drop the section, never show a raw IDR figure.
+  if (formatPrice && cuts.some((c) => formatPrice(c) === null)) return [];
+  const fmt = (n: number) => formatPrice?.(n) ?? n.toLocaleString();
   const options: PpobFacetOption[] = [];
   options.push({ id: `price:-1:${cuts[0]}`, label: `< ${fmt(cuts[0])}` });
   for (let i = 0; i < cuts.length - 1; i++) {
@@ -254,6 +259,7 @@ function buildFamilyOptions(families: (string | null)[]): PpobFacetOption[] {
  */
 export function buildFacetSections(
   variants: readonly TProductVariant[] | undefined,
+  formatPrice?: (price: number) => string | null,
 ): PpobFacetSection[] {
   if (!variants?.length) return [];
 
@@ -284,7 +290,7 @@ export function buildFacetSections(
     {
       kind: "price",
       title: SECTION_TITLES.price,
-      options: buildPriceOptions(prices),
+      options: buildPriceOptions(prices, formatPrice),
     },
     {
       kind: "quota",

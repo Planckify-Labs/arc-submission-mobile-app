@@ -25,7 +25,9 @@ import {
 import { queryClient } from "@/app/_layout";
 import LoadinngSpinnerPopup from "@/components/common/LoadinngSpinnerPopup";
 import OptionSelectorModal from "@/components/common/OptionSelectorModal";
+import { PRODUCT_PAYMENT_COPY } from "@/constants/configs/productPayment";
 import { formatPhoneNumber } from "@/constants/ISP-list";
+import { useProductPrice } from "@/hooks/queries/useProductPrice";
 import {
   useProductById,
   useProductInputFields,
@@ -58,6 +60,8 @@ type ProductVariant = {
 export default function ItemWithInput({
   productId,
 }: ItemVariantWithInputProps) {
+  const { mode, priceText } = useProductPrice();
+  const copy = PRODUCT_PAYMENT_COPY[mode];
   const isMounted = useRef(true);
   const {
     data: product,
@@ -387,7 +391,7 @@ export default function ItemWithInput({
             </Text>
           </View>
           <Text className="text-light-primary-red font-bold text-base ml-2">
-            {parseInt(price).toLocaleString()} points
+            {priceText(price)}
           </Text>
         </View>
       </TouchableOpacity>
@@ -625,8 +629,8 @@ export default function ItemWithInput({
 
       <LoadinngSpinnerPopup
         visible={isNavigating}
-        title="Preparing Redemption"
-        message="Please wait while we prepare your redemption..."
+        title={copy.preparingTitle}
+        message={copy.preparingMessage}
       />
     </>
   );

@@ -38,6 +38,8 @@ import {
 } from "react-native";
 import { HalftoneVoiceWave } from "@/components/common/HalftoneVoiceWave";
 import { FEATURE_PASSKEY_ONLY_ONBOARDING } from "@/constants/configs/featureFlags";
+import type { TProductPaymentMode } from "@/constants/configs/productPayment";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { useAgentPrefill } from "@/hooks/useAgentPrefill";
 import { useVoiceTranscription } from "@/hooks/useVoiceTranscription";
 import ActivitySection, { type ActivitySectionRef } from "./ActivitySection";
@@ -190,19 +192,39 @@ const DEFAULT_CAPABILITIES: Capability[] = [
   },
 ];
 
-const CAPABILITIES: Capability[] = HACKATHON_BUILD
+const BASE_CAPABILITIES: Capability[] = HACKATHON_BUILD
   ? HACKATHON_CAPABILITIES
   : DEFAULT_CAPABILITIES;
+
+/**
+ * TOKEN mode: products are bought with a stablecoin, so the "Redeem" card
+ * becomes "Shop". POINTS keeps the card as it is.
+ */
+function capabilitiesFor(mode: TProductPaymentMode): Capability[] {
+  if (mode === "POINTS") return BASE_CAPABILITIES;
+  return BASE_CAPABILITIES.map((cap) =>
+    cap.id === "redeem"
+      ? {
+          ...cap,
+          label: "Shop",
+          sample: "pay with stablecoins",
+          prompt: "What products can I buy?",
+        }
+      : cap,
+  );
+}
 
 // Quick chips complement the capability rail rather than duplicate it: the
 // cards launch transactional intents (Pay / Swap / Earn / Redeem) while
 // these are one-tap *informational* asks the cards don't cover.
-const QUICK_PROMPTS: {
+type QuickPrompt = {
   id: string;
   label: string;
   prompt: string;
   icon: LucideIcon;
-}[] = [
+};
+
+const QUICK_PROMPTS: QuickPrompt[] = [
   {
     id: "points",
     label: "Points",
@@ -228,6 +250,12 @@ const QUICK_PROMPTS: {
     icon: HelpCircle,
   },
 ];
+
+/** TOKEN mode has no points to explain, so the "Points" chip is dropped. */
+function quickPromptsFor(mode: TProductPaymentMode): QuickPrompt[] {
+  if (mode === "POINTS") return QUICK_PROMPTS;
+  return QUICK_PROMPTS.filter((chip) => chip.id !== "points");
+}
 
 // Prompt fired by the spotlight "Show me" CTA — matches the card's pitch.
 // Hackathon build: the spec §5 demo script ("send $50 to my mom") in AUSD.
@@ -390,6 +418,9 @@ const TakumiAgentSection = forwardRef<
   TakumiAgentSectionProps
 >(({ onAsk, onOpenAgentChat, onVoiceFocus }, ref) => {
   const { width } = useWindowDimensions();
+  const mode = useProductPaymentMode();
+  const capabilities = useMemo(() => capabilitiesFor(mode), [mode]);
+  const quickPrompts = useMemo(() => quickPromptsFor(mode), [mode]);
   const [activeTab, setActiveTab] = useState<"takumi" | "history">("takumi");
   const [activeCard, setActiveCard] = useState(0);
   const activityRef = useRef<ActivitySectionRef>(null);
@@ -484,7 +515,7 @@ const TakumiAgentSection = forwardRef<
   const capWidth = Math.round(innerWidth * 0.46);
 
   const snapOffsets = useMemo(() => {
-    const widths = [heroWidth, ...CAPABILITIES.map(() => capWidth)];
+    const widths = [heroWidth, ...capabilities.map(() => capWidth)];
     const offsets: number[] = [];
     let acc = 0;
     for (const w of widths) {
@@ -492,7 +523,7 @@ const TakumiAgentSection = forwardRef<
       acc += w + RAIL_GAP;
     }
     return offsets;
-  }, [heroWidth, capWidth]);
+  }, [heroWidth, capWidth, capabilities]);
 
   const handleRailScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -511,7 +542,7 @@ const TakumiAgentSection = forwardRef<
     [snapOffsets, activeCard],
   );
 
-  const railLength = CAPABILITIES.length + 1;
+  const railLength = capabilities.length + 1;
 
   return (
     <View className="px-4">
@@ -624,7 +655,7 @@ const TakumiAgentSection = forwardRef<
                   handleSubmitPrompt(SPOTLIGHT_PROMPT, "spotlight")
                 }
               />
-              {CAPABILITIES.map((item) => (
+              {capabilities.map((item) => (
                 <CapabilityCard
                   key={item.id}
                   item={item}
@@ -652,7 +683,7 @@ const TakumiAgentSection = forwardRef<
 
             {/* quick prompt chips */}
             <View className="flex-row items-center justify-between gap-1">
-              {QUICK_PROMPTS.map((chip) => {
+              {quickPrompts.map((chip) => {
                 const Icon = chip.icon;
                 return (
                   <TouchableOpacity

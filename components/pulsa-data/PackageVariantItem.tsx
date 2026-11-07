@@ -2,6 +2,8 @@ import { ChevronRight } from "lucide-react-native";
 import React, { memo } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import type { TProductVariant } from "@/api/types/product";
+import type { TProductPaymentMode } from "@/constants/configs/productPayment";
+import { useProductPrice } from "@/hooks/queries/useProductPrice";
 import { describeVariant, formatQuota, formatValidity } from "@/services/ppob";
 
 interface PackageVariantItemProps {
@@ -14,6 +16,24 @@ interface PackageVariantItemProps {
 
 function formatPoints(points: number | null): string {
   return (points ?? 0).toLocaleString();
+}
+
+/**
+ * The price figure and its unit label. POINTS keeps the number plus a
+ * "points" sub-label; TOKEN shows the USD price with no unit label.
+ */
+function formatPriceFigure(
+  points: number | null,
+  mode: TProductPaymentMode,
+  priceText: (raw: number) => string,
+): { value: string; unit: string | null } {
+  if (mode === "TOKEN") {
+    return {
+      value: priceText(points ?? 0),
+      unit: null,
+    };
+  }
+  return { value: formatPoints(points), unit: "points" };
 }
 
 /** One labeled column in the data-plan card (Quota / Validity / Price). */
@@ -58,10 +78,15 @@ export const PackageVariantItem = memo(function PackageVariantItem({
   onPress,
   grid = false,
 }: PackageVariantItemProps) {
+  const { mode, priceText } = useProductPrice();
   const { dataMb, validityDays, pricePoints } = describeVariant(variant);
   const quota = formatQuota(dataMb);
   const validity = formatValidity(validityDays);
-  const price = formatPoints(pricePoints);
+  const { value: price, unit } = formatPriceFigure(
+    pricePoints,
+    mode,
+    priceText,
+  );
   const dimmed = disabled ? "opacity-50" : "";
 
   // ---- Compact grid card (phone credit / pulsa) --------------------------
@@ -90,10 +115,15 @@ export const PackageVariantItem = memo(function PackageVariantItem({
         </View>
         <View className="h-px bg-light-matte-black/5 my-2.5" />
         <Text className="text-light-primary-red font-bold text-base">
-          {price}{" "}
-          <Text className="text-xs font-normal text-light-matte-black/50">
-            points
-          </Text>
+          {price}
+          {unit ? (
+            <>
+              {" "}
+              <Text className="text-xs font-normal text-light-matte-black/50">
+                {unit}
+              </Text>
+            </>
+          ) : null}
         </Text>
       </TouchableOpacity>
     );
@@ -116,7 +146,7 @@ export const PackageVariantItem = memo(function PackageVariantItem({
           <CardSection
             label="Price"
             value={price}
-            sub="points"
+            sub={unit ?? undefined}
             accent
             align="right"
           />
@@ -156,10 +186,15 @@ export const PackageVariantItem = memo(function PackageVariantItem({
         ) : null}
       </View>
       <Text className="text-light-primary-red font-bold text-base">
-        {price}{" "}
-        <Text className="text-xs font-normal text-light-matte-black/50">
-          points
-        </Text>
+        {price}
+        {unit ? (
+          <>
+            {" "}
+            <Text className="text-xs font-normal text-light-matte-black/50">
+              {unit}
+            </Text>
+          </>
+        ) : null}
       </Text>
     </TouchableOpacity>
   );

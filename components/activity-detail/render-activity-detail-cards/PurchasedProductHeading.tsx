@@ -3,6 +3,14 @@ import React from "react";
 import { Image, Text, View } from "react-native";
 import type { TPurchaseResponse } from "@/api/types/purchase";
 import type { TRedemptionDetail } from "@/api/types/redeem";
+import { paidWithText } from "@/services/productPay/receipt";
+import { showsProductIdr } from "@/services/catalog/usdPrice";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
+import { formatExactTokenAmount } from "@/utils/tokenAmount";
+import {
+  fulfilmentStatusLabel,
+  moneyStatusLabel,
+} from "@/utils/fulfilmentUtils";
 
 interface PurchasedProductCardProps {
   purchase?: TPurchaseResponse;
@@ -21,6 +29,7 @@ export default function PurchasedProductHeading({
   purchase,
   redemption,
 }: PurchasedProductCardProps) {
+  const mode = useProductPaymentMode();
   if (redemption) {
     const statusStyle =
       STATUS_COLORS[redemption.status] ?? STATUS_COLORS.PENDING;
@@ -66,6 +75,12 @@ export default function PurchasedProductHeading({
 
   const product = purchase?.productVariant?.product;
   const variant = purchase?.productVariant;
+  // Same status vocabulary as the detail card below: REFUNDED and PROCESSING
+  // must not fall through to the red "failed" styling.
+  const purchaseStyle = STATUS_COLORS[purchase.status] ?? STATUS_COLORS.PENDING;
+  const purchaseLabel = purchase.fulfilment
+    ? fulfilmentStatusLabel(purchase.fulfilment.status)
+    : moneyStatusLabel(purchase.status);
 
   return (
     <View className="bg-light- rounded-3xl p-6 mx-4 mb-6">
@@ -87,8 +102,17 @@ export default function PurchasedProductHeading({
         </View>
 
         <Text className="text-light-matte-black font-extrabold text-2xl mb-2 text-center">
-          {purchase.transaction.fiatCurrency}{" "}
-          {Number(purchase.transaction.amountInFiat).toLocaleString()}
+          {!showsProductIdr(mode)
+            ? paidWithText(
+                `${formatExactTokenAmount(
+                  purchase.transaction.amount,
+                  purchase.transaction.token.decimals,
+                )} ${purchase.transaction.token.symbol}`,
+                purchase.pointsApplied,
+              )
+            : `${purchase.transaction.fiatCurrency} ${Number(
+                purchase.transaction.amountInFiat,
+              ).toLocaleString()}`}
         </Text>
 
         <Text className="text-light-matte-black/70 text-sm mb-3 text-center">
@@ -96,25 +120,9 @@ export default function PurchasedProductHeading({
         </Text>
 
         <View className="mt-4">
-          <View
-            className={`px-3 py-1 rounded-full ${
-              purchase.status === "COMPLETED"
-                ? "bg-green-100"
-                : purchase.status === "PENDING"
-                  ? "bg-yellow-100"
-                  : "bg-red-100"
-            }`}
-          >
-            <Text
-              className={`text-xs font-medium ${
-                purchase.status === "COMPLETED"
-                  ? "text-emerald-700"
-                  : purchase.status === "PENDING"
-                    ? "text-yellow-700"
-                    : "text-light-primary-red"
-              }`}
-            >
-              {purchase.status}
+          <View className={`px-3 py-1 rounded-full ${purchaseStyle.bg}`}>
+            <Text className={`text-xs font-medium ${purchaseStyle.text}`}>
+              {purchaseLabel}
             </Text>
           </View>
         </View>

@@ -11,7 +11,7 @@ export const bookingApi = {
       const response = await api.get("bookings").json<TBookingListResponse>();
       return response;
     } catch (error) {
-      console.error("Failed to fetch booking list:", error);
+      if (__DEV__) console.warn("Failed to fetch booking list:", error);
       throw error;
     }
   },
@@ -23,9 +23,14 @@ export const bookingApi = {
         .json<TBooking>();
       return response;
     } catch (error) {
-      console.error("Failed to create booking:", error);
+      if (__DEV__) console.warn("Failed to create booking:", error);
       throw error;
     }
+  },
+
+  /** Releases the points held by a booking. Best effort for the caller. */
+  cancelBooking: async (bookingId: string) => {
+    await api.put(`bookings/${encodeURIComponent(bookingId)}/cancel`);
   },
 
   getLatestBooking: async (walletAddress: string) => {
@@ -35,7 +40,7 @@ export const bookingApi = {
         .json<TBooking | null>();
       return response;
     } catch (error) {
-      console.error("Failed to fetch latest booking:", error);
+      if (__DEV__) console.warn("Failed to fetch latest booking:", error);
       throw error;
     }
   },

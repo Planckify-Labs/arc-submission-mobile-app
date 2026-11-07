@@ -10,6 +10,7 @@
 
 import type { TProductSearchResult } from "@/api/endpoints/products";
 import type { TProductVariant } from "@/api/types/product";
+import { usdPriceString } from "./usdPrice";
 
 export type TCatalogDisplayProduct = {
   id: string;
@@ -21,6 +22,8 @@ export type TCatalogDisplayProduct = {
   category: { id: string; name: string } | null;
   /** Lowest active variant points cost ("from X pts"); null if unpriced. */
   starting_points: string | null;
+  /** Same price in USD ("3.21"); omitted when no rate is available. */
+  starting_price_usd?: string;
   input_type: string | null;
 };
 
@@ -54,16 +57,24 @@ export function formatPoints(raw?: string | null): string | null {
 
 export function toCatalogDisplayProducts(
   raw: TProductSearchResult[],
+  idrPerUsd?: number | null,
 ): TCatalogDisplayProduct[] {
-  return raw.map((p) => ({
-    id: p.id,
-    name: p.name,
-    description: p.description ?? null,
-    image_url: p.imageUrl ?? null,
-    code: p.code,
-    category_id: p.categoryId,
-    category: p.category ? { id: p.category.id, name: p.category.name } : null,
-    starting_points: startingPoints(p.variants),
-    input_type: p.inputType ?? null,
-  }));
+  return raw.map((p) => {
+    const startingPoints_ = startingPoints(p.variants);
+    const usd = usdPriceString(startingPoints_, idrPerUsd);
+    return {
+      id: p.id,
+      name: p.name,
+      description: p.description ?? null,
+      image_url: p.imageUrl ?? null,
+      code: p.code,
+      category_id: p.categoryId,
+      category: p.category
+        ? { id: p.category.id, name: p.category.name }
+        : null,
+      starting_points: startingPoints_,
+      ...(usd ? { starting_price_usd: usd } : {}),
+      input_type: p.inputType ?? null,
+    };
+  });
 }

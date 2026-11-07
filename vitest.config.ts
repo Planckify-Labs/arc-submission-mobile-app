@@ -274,6 +274,19 @@ export default defineConfig({
       // so a lapsed session or a dropped request must defer it, never lose it.
       "services/transfers/transferRecordOutbox.test.ts",
       "services/points/pointDepositOutbox.test.ts",
+      // Product checkout (token mode): the shared on-chain pay core, the
+      // createTransaction orchestrator (64-char refId, exact approval), the
+      // order-of-operations flow incl. the no-second-payment guard, token
+      // choice, and the durable purchase outbox.
+      // USD display: idrToUsd/formatProductPrice, budget conversion, catalog USD fields.
+      "services/catalog/usdPrice.test.ts",
+      "services/productPay/productPay.test.ts",
+      "services/productPay/checkoutFlow.test.ts",
+      "services/productPay/checkoutCopy.test.ts",
+      "services/productPay/tokenChoice.test.ts",
+      "services/productPay/planPoints.test.ts",
+      "services/productPay/funding.test.ts",
+      "services/productPay/purchaseOutbox.test.ts",
       // Push-token registration retry state: persisted so a failed
       // registration survives the app being killed mid-retry.
       "services/push/pushRegistrationState.test.ts",

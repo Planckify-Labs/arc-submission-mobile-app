@@ -5,7 +5,7 @@ import type { TBooking, TBookingCreateRequest } from "@/api/types/booking";
 interface TUseBookingsOptions {
   walletAddress?: string;
   productId?: string;
-  status?: "PENDING" | "COMPLETED" | "FAILED" | "EXPIRED";
+  status?: TBooking["status"];
   take?: number;
   cursor?: string;
 }
@@ -16,10 +16,9 @@ export const useBookings = (options?: TUseBookingsOptions) => {
     queryFn: async () => {
       try {
         const response = await bookingApi.getBookingList();
-        console.log("Raw API Response (All):", response);
         return response;
       } catch (error) {
-        console.error("API Error:", error);
+        if (__DEV__) console.warn("API Error:", error);
         throw error;
       }
     },
@@ -34,10 +33,9 @@ export const useLatestBooking = (walletAddress: string) => {
     queryFn: async () => {
       try {
         const response = await bookingApi.getLatestBooking(walletAddress);
-        console.log("Raw API Response (Latest):", response);
         return response;
       } catch (error) {
-        console.error("API Error:", error);
+        if (__DEV__) console.warn("API Error:", error);
         throw error;
       }
     },
@@ -60,11 +58,11 @@ export const useCreateBooking = () => {
             exchangeRateId: data.payment.exchangeRateId,
           },
           customerInfo: data.customerInfo,
+          usePoints: data.usePoints,
         });
-        console.log("Raw API Response (Create):", response);
         return response;
       } catch (error) {
-        console.error("API Error:", error);
+        if (__DEV__) console.warn("API Error:", error);
         throw error;
       }
     },

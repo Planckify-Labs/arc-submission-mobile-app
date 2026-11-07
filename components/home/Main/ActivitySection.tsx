@@ -29,7 +29,9 @@ import {
 import { formatUnits } from "viem/utils";
 import type { TRedemptionHistoryItem } from "@/api/types/redeem";
 import { TTransaction } from "@/api/types/transaction";
+import { PRODUCT_PAYMENT_COPY } from "@/constants/configs/productPayment";
 import { useIsAuthenticated } from "@/hooks/queries/useAuth";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { useRedemptionHistory } from "@/hooks/queries/useRedeem";
 import { useTransactionHistory } from "@/hooks/queries/useTransactions";
 import { useWallet } from "@/hooks/useWallet";
@@ -108,6 +110,7 @@ function SignInCta({
 const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
   ({ embedded = false }, ref) => {
     const { activeWallet } = useWallet();
+    const paymentCopy = PRODUCT_PAYMENT_COPY[useProductPaymentMode()];
     const {
       isAuthenticated,
       isLoading: isAuthLoading,
@@ -261,6 +264,8 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
       </TouchableOpacity>
     );
 
+    // A PAYMENT row with a purchase attached is a product bought on-chain
+    // (TOKEN mode): label it with the product and open its purchase timeline.
     const paymentHistoryButton = (payment: TTransaction) => (
       <TouchableOpacity
         activeOpacity={0.7}
@@ -268,7 +273,9 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
         onPress={() =>
           router.push({
             pathname: "/activity-detail",
-            params: { paymentId: payment.id },
+            params: payment.purchase
+              ? { purchaseId: payment.purchase.id }
+              : { paymentId: payment.id },
           })
         }
       >
@@ -303,7 +310,9 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
           className="text-light-matte-black text-center text-xs font-bold mt-1 max-w-[70px]"
           numberOfLines={1}
         >
-          {payment.merchantName ?? "Merchant"}
+          {payment.purchase
+            ? (payment.purchase.productVariant?.name ?? "Purchase")
+            : (payment.merchantName ?? "Merchant")}
         </Text>
       </TouchableOpacity>
     );
@@ -558,8 +567,7 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
                     No Activity Yet
                   </Text>
                   <Text className="text-light-matte-black/45 text-center text-sm leading-6 max-w-[260px]">
-                    Start your journey by redeeming with points or sending
-                    crypto
+                    {paymentCopy.emptyActivityHint}
                   </Text>
                 </View>
 
@@ -584,7 +592,9 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
                       />
                     </View>
                     <Text className="text-white font-bold text-sm">
-                      Redemptions
+                      {paymentCopy.serviceTitle === "Redeem"
+                        ? "Redemptions"
+                        : paymentCopy.serviceTitle}
                     </Text>
                   </TouchableOpacity>
 

@@ -118,6 +118,8 @@ export type TPurchaseResponse = {
   productVariant: TProductVariant;
   /** Legacy — prefer `fulfilment.delivery`. */
   voucherCode?: string | null;
+  /** Points spent toward this purchase, a decimal string; "0"/absent when none. */
+  pointsApplied?: string;
   /** Absent on API versions that predate the fulfilment leg. */
   fulfilment?: TFulfilment;
   booking: TBooking;

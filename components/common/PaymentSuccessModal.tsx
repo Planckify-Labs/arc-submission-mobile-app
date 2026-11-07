@@ -10,6 +10,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
+import { paidWithText } from "@/services/productPay/receipt";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type PaymentSuccessModalProps = {
@@ -18,6 +19,11 @@ type PaymentSuccessModalProps = {
   productName?: string;
   pointsSpent?: string;
   redemptionId?: string;
+  /** Token (on-chain) purchase: what was paid. Set instead of `pointsSpent`. */
+  tokenAmount?: string;
+  tokenSymbol?: string;
+  /** Points applied alongside the tokens; 0 or absent shows tokens only. */
+  pointsApplied?: number;
   onViewActivity?: () => void;
 };
 
@@ -29,8 +35,14 @@ export default function PaymentSuccessModal({
   productName,
   pointsSpent,
   redemptionId,
+  tokenAmount,
+  tokenSymbol,
+  pointsApplied,
   onViewActivity,
 }: PaymentSuccessModalProps) {
+  // A token purchase is only "sent" here: the network and our servers are
+  // still confirming it. A points redemption is already settled.
+  const isTokenPayment = !!tokenAmount && !!tokenSymbol;
   const { bottom } = useSafeAreaInsets();
   const bottomOffset = Platform.OS === "ios" ? 16 : bottom > 0 ? bottom : 0;
 
@@ -136,18 +148,20 @@ export default function PaymentSuccessModal({
                 <CheckCircle size={64} color="#10b981" strokeWidth={2} />
               </View>
               <Text className="text-light-matte-black font-bold text-2xl mb-2">
-                Order placed!
+                {isTokenPayment ? "Payment sent" : "Order placed!"}
               </Text>
               <Text className="text-light-matte-black/60 text-center text-sm">
-                {productName
-                  ? `We're preparing your ${productName}. We'll notify you the moment it's ready.`
-                  : "We're preparing your order. We'll notify you the moment it's ready."}
+                {isTokenPayment
+                  ? `Your payment has been sent and is being confirmed. Once it is, we'll start preparing ${productName ?? "your order"}. You can follow it in Activity, and we'll notify you.`
+                  : productName
+                    ? `We're preparing your ${productName}. We'll notify you the moment it's ready.`
+                    : "We're preparing your order. We'll notify you the moment it's ready."}
               </Text>
             </Animated.View>
 
             <View className="bg-white rounded-2xl p-4 mb-4 shadow-sm">
               <Text className="text-light-matte-black font-bold text-base mb-3">
-                Redemption Details
+                {isTokenPayment ? "Payment Details" : "Redemption Details"}
               </Text>
 
               {productName && (
@@ -160,6 +174,20 @@ export default function PaymentSuccessModal({
                     numberOfLines={1}
                   >
                     {productName}
+                  </Text>
+                </View>
+              )}
+
+              {isTokenPayment && (
+                <View className="flex-row justify-between items-center mb-2">
+                  <Text className="text-light-matte-black/60 text-sm">
+                    Paid
+                  </Text>
+                  <Text className="text-light-primary-red text-sm font-bold">
+                    {paidWithText(
+                      `${tokenAmount} ${tokenSymbol}`,
+                      pointsApplied,
+                    )}
                   </Text>
                 </View>
               )}

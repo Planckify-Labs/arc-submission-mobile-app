@@ -4,6 +4,7 @@ import { Pressable, Text, View } from "react-native";
 import Animated, { LinearTransition } from "react-native-reanimated";
 import { useIsAuthenticated } from "@/hooks/queries/useAuth";
 import { usePointBalance } from "@/hooks/queries/usePoints";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { useGoToAuth } from "@/hooks/useGoToAuth";
 import { tapFeedback } from "@/utils/hapticsUtils";
 
@@ -16,11 +17,13 @@ const CARD_ASPECT_RATIO = 85.6 / 53.98;
  * The Points pass: a shortcut, not a panel. Tapping it opens the point
  * deposit screen (`/deposit`), which owns the network and token checks.
  * Signed out, it says so and opens sign-in instead of showing a 0.
+ * TOKEN mode no longer sells points, so it opens the catalog to spend them.
  */
 function PointsPass({ overlapped }: { overlapped: boolean }) {
   const { isAuthenticated, isLoading: isAuthLoading } = useIsAuthenticated();
   const { data: pointBalance, isFetching } = usePointBalance();
   const { goToAuth, navigatingToAuth } = useGoToAuth();
+  const canTopUp = useProductPaymentMode() === "POINTS";
   const signedOut = !isAuthLoading && isAuthenticated !== true;
 
   const points = Number.parseInt(pointBalance?.balance ?? "0", 10);
@@ -48,13 +51,13 @@ function PointsPass({ overlapped }: { overlapped: boolean }) {
         accessibilityLabel={
           signedOut
             ? "Sign in to see and top up your points"
-            : `TakumiPay Points, ${pointsText} points. Top up`
+            : `TakumiPay Points, ${pointsText} points. ${canTopUp ? "Top up" : "Spend"}`
         }
         disabled={navigatingToAuth}
         onPress={() => {
           tapFeedback();
           if (signedOut) void goToAuth();
-          else router.push("/deposit");
+          else router.push(canTopUp ? "/deposit" : "/service");
         }}
         style={({ pressed }) => ({
           // ISO/IEC 7810 ID-1, the standard bank card: 85.60 × 53.98 mm.
@@ -66,7 +69,7 @@ function PointsPass({ overlapped }: { overlapped: boolean }) {
         <View className="flex-row items-center justify-between">
           <Text className="text-sm font-bold text-white">TakumiPay Points</Text>
           <Text className="text-[13px] font-semibold text-white">
-            {signedOut ? "Sign in →" : "Top up →"}
+            {signedOut ? "Sign in →" : canTopUp ? "Top up →" : "Spend →"}
           </Text>
         </View>
         {signedOut ? (

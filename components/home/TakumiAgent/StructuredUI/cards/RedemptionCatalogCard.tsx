@@ -10,10 +10,10 @@ import {
 } from "@/api/endpoints/products";
 import OptimizedImage from "@/components/common/OptimizedImage";
 import SingleLoadingSekeleton from "@/components/common/SingleLoadingSekeleton";
-import {
-  formatPoints,
-  toCatalogDisplayProducts,
-} from "@/services/catalog/catalogDisplay";
+import { PRODUCT_PAYMENT_COPY } from "@/constants/configs/productPayment";
+import { useProductPrice } from "@/hooks/queries/useProductPrice";
+import { toCatalogDisplayProducts } from "@/services/catalog/catalogDisplay";
+import { formatUsd, usdBudgetToPoints } from "@/services/catalog/usdPrice";
 import type { ToolComponentProps } from "../types";
 import PagerButton from "./PagerButton";
 
@@ -42,6 +42,8 @@ type CatalogInput = {
   is_voucher?: boolean;
   min_points?: number;
   max_points?: number;
+  min_price_usd?: number;
+  max_price_usd?: number;
   take?: number;
 };
 
@@ -50,16 +52,34 @@ type CatalogInput = {
  * params, so the card can re-fetch later pages with the exact same filters
  * the agent used for page 0.
  */
-function inputToSearchParams(input: CatalogInput): TProductSearchParams {
+function inputToSearchParams(
+  input: CatalogInput,
+  idrPerUsd: number | null,
+): TProductSearchParams | null {
+  // Same budget conversion as the agent executor (floor max, ceil min).
+  const usd = usdBudgetToPoints({
+    minUsd: input.min_price_usd,
+    maxUsd: input.max_price_usd,
+    idrPerUsd,
+  });
+  // A USD bound with no rate yet: no params, so no unfiltered fetch.
+  if (usd === null) return null;
   return {
     query: input.query,
     name: input.name,
     categoryName: input.category,
     categoryId: input.category_id,
     isVoucher: input.is_voucher,
-    minPoints: input.min_points,
-    maxPoints: input.max_points,
+    minPoints: maxOf(input.min_points, usd.minPoints),
+    maxPoints: minOf(input.max_points, usd.maxPoints),
   };
+}
+
+function maxOf(a?: number, b?: number): number | undefined {
+  return a === undefined ? b : b === undefined ? a : Math.max(a, b);
+}
+function minOf(a?: number, b?: number): number | undefined {
+  return a === undefined ? b : b === undefined ? a : Math.min(a, b);
 }
 
 type CatalogPayload = {
@@ -77,6 +97,10 @@ type CatalogOutput = {
 const BRAND_RED = "#c71c4b";
 
 function ProductTile({ product }: { product: CatalogProduct }) {
+  const { formatPrice } = useProductPrice();
+  const startingPrice = formatPrice(product.starting_points, {
+    compact: true,
+  });
   const onPress = () => {
     router.push({
       pathname: "/purchase-item",
@@ -110,12 +134,12 @@ function ProductTile({ product }: { product: CatalogProduct }) {
       >
         {product.name}
       </Text>
-      {formatPoints(product.starting_points) ? (
+      {startingPrice ? (
         <Text
           numberOfLines={1}
           className="text-[9px] text-center text-light-primary-red font-bold max-w-16"
         >
-          {formatPoints(product.starting_points)}
+          {startingPrice}
         </Text>
       ) : null}
     </TouchableOpacity>
@@ -256,6 +280,8 @@ function groupFlatByCategory(products: CatalogProduct[]): {
 const RedemptionCatalogCard: React.FC<
   ToolComponentProps<CatalogInput, CatalogOutput>
 > = ({ state, input, output }) => {
+  const { mode, idrPerUsd, formatPrice } = useProductPrice();
+  const copy = PRODUCT_PAYMENT_COPY[mode];
   // Surface whatever the user actually searched for. `query` is the broad
   // keyword lever, `category` scopes to a product type, `name` is an exact
   // product match — show the most specific one we have.
@@ -263,10 +289,21 @@ const RedemptionCatalogCard: React.FC<
   // A points-budget query ("under 2,300 pts") wants a flat cheapest-first
   // list — the API already orders results that way, so we must NOT regroup
   // them by category (that would shatter the price ordering).
-  const isPointsQuery = input.min_points != null || input.max_points != null;
+  const hasUsdBudget =
+    input.min_price_usd != null || input.max_price_usd != null;
+  const isPointsQuery =
+    input.min_points != null || input.max_points != null || hasUsdBudget;
   const pointsLabel = (() => {
-    const min = formatPoints(input.min_points?.toString());
-    const max = formatPoints(input.max_points?.toString());
+    // TOKEN mode shows the USD the user asked for, never a points figure.
+    const usd = (v?: number) => (v == null ? null : formatUsd(v));
+    const min =
+      mode === "TOKEN" && hasUsdBudget
+        ? usd(input.min_price_usd)
+        : formatPrice(input.min_points, { compact: true });
+    const max =
+      mode === "TOKEN" && hasUsdBudget
+        ? usd(input.max_price_usd)
+        : formatPrice(input.max_points, { compact: true });
     if (min && max) return `${min} – ${max}`;
     if (max) return `Up to ${max}`;
     if (min) return `From ${min}`;
@@ -274,7 +311,7 @@ const RedemptionCatalogCard: React.FC<
   })();
   const searchLabel = searchTerm
     ? `Matches for "${searchTerm}"`
-    : (pointsLabel ?? "Redemption catalog");
+    : (pointsLabel ?? copy.catalogTitle);
 
   // ── Client-side paging ───────────────────────────────────────────────
   // Page 0 is the agent's tool result; Prev/Next fetch later pages here
@@ -285,18 +322,18 @@ const RedemptionCatalogCard: React.FC<
     ? outputPayload.products
     : null;
   const pageSize = outputFlat?.length ?? 0;
-  const apiParams = inputToSearchParams(input);
+  const apiParams = inputToSearchParams(input, idrPerUsd);
   const [page, setPage] = useState(0);
   const pageQuery = useQuery({
     queryKey: ["redemption-catalog-page", apiParams, pageSize, page],
     queryFn: () =>
       productApi.searchProducts({
-        ...apiParams,
+        ...(apiParams as TProductSearchParams),
         take: pageSize,
         skip: page * pageSize,
       }),
     // Page 0 already came from the tool result; only fetch beyond it.
-    enabled: page > 0 && pageSize > 0,
+    enabled: page > 0 && pageSize > 0 && apiParams !== null,
     staleTime: 60 * 1000,
     placeholderData: keepPreviousData,
   });

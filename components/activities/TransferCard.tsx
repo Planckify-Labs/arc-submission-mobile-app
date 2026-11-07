@@ -5,6 +5,8 @@ import React, { useCallback } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { formatUnits } from "viem/utils";
 import { TTransaction } from "@/api/types/transaction";
+import { useProductPrice } from "@/hooks/queries/useProductPrice";
+import { transferFiatText } from "@/services/catalog/usdPrice";
 import { formatDate } from "@/utils/dateUtils";
 import { copyToClipboard, formatTokenAmount } from "@/utils/helperUtils";
 import { buildExplorerTxUrl, truncateAddress } from "@/utils/walletUtils";
@@ -12,6 +14,8 @@ import Chip from "../common/Chip";
 
 const TransferCard = React.memo(
   ({ transaction }: { transaction: TTransaction }) => {
+    const { mode, idrPerUsd } = useProductPrice();
+    const fiatText = transferFiatText(transaction, mode, idrPerUsd);
     const router = useRouter();
 
     const openBlockExplorer = useCallback(
@@ -105,10 +109,8 @@ const TransferCard = React.memo(
               })()}{" "}
             {transaction.token.symbol}
           </Text>
-          {transaction?.amountInFiat && (
-            <Text className="text-light-matte-black text-sm">
-              {transaction.amountInFiat.toString()}
-            </Text>
+          {fiatText && (
+            <Text className="text-light-matte-black text-sm">{fiatText}</Text>
           )}
         </View>
 

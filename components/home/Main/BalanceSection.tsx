@@ -25,6 +25,7 @@ import TakumipayHeaderLogo from "@/components/common/TakumipayHeaderLogo";
 import { useIsAuthenticated } from "@/hooks/queries/useAuth";
 import { useBlockchains } from "@/hooks/queries/useBlockchains";
 import { usePointBalance } from "@/hooks/queries/usePoints";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { usePaymentFeatured } from "@/hooks/queries/useProducts";
 import { useTokens } from "@/hooks/queries/useTokens";
 import { useGoToAuth } from "@/hooks/useGoToAuth";
@@ -75,6 +76,7 @@ export interface BalanceSectionRef {
 
 const BalanceSection = forwardRef<BalanceSectionRef>((props, ref) => {
   const { activeWallet, activeChain } = useWallet();
+  const mode = useProductPaymentMode();
   useQRPrefetch();
   const nativeSymbol = getNativeSymbol(activeChain) ?? "N/A";
 
@@ -156,6 +158,7 @@ const BalanceSection = forwardRef<BalanceSectionRef>((props, ref) => {
     isFetching: isPointsFetching,
     refetch: refetchPoints,
   } = usePointBalance();
+  const pointBalanceValue = parseInt(pointBalance?.balance ?? "0");
   const { data: paymentFeatured, refetch: refetchPayment } =
     usePaymentFeatured();
   const { balance, raw, formatRaw, isFetching, refetch } = useWalletBalance(
@@ -353,7 +356,13 @@ const BalanceSection = forwardRef<BalanceSectionRef>((props, ref) => {
                       </Text>
                     </TouchableOpacity>
                   ) : null}
-                  {isAuthenticated ? (
+                  {mode === "TOKEN" ? (
+                    isAuthenticated && pointBalanceValue > 0 ? (
+                      <Text className="text-light-matte-black text-md font-light">
+                        {`${pointBalanceValue.toLocaleString()} points`}
+                      </Text>
+                    ) : null
+                  ) : isAuthenticated ? (
                     <Text className="text-light-matte-black text-md font-light">
                       {isPointsFetching
                         ? "..."

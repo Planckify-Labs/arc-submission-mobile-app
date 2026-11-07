@@ -3,6 +3,9 @@ import { router } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import PinConfirmationModal from "@/components/common/PinConfirmationModal";
+import { useIsAuthenticated } from "@/hooks/queries/useAuth";
+import { usePointBalance } from "@/hooks/queries/usePoints";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import {
   type BringInStep,
   useBringInRunner,
@@ -33,6 +36,15 @@ import UnifiedBalancePass from "./UnifiedBalancePass";
  */
 function AddFundsPasses({ onBuy }: { onBuy: () => void }) {
   const { activeWallet } = useWallet();
+  const mode = useProductPaymentMode();
+  const { isAuthenticated } = useIsAuthenticated();
+  const { data: pointBalance } = usePointBalance();
+  // TOKEN mode stops offering points top-ups, but a signed-in holder with a
+  // balance still sees their pass.
+  const showPointsPass =
+    mode === "POINTS" ||
+    (isAuthenticated === true &&
+      Number.parseInt(pointBalance?.balance ?? "0", 10) > 0);
   const data = useUnifiedBalancePasses();
   const { pass, chains, bringIn, lookupChain, refresh } = data;
   const runner = useBringInRunner(lookupChain);
@@ -180,7 +192,7 @@ function AddFundsPasses({ onBuy }: { onBuy: () => void }) {
           onBuy={onBuy}
         />
       ) : null}
-      <PointsPass overlapped={!!pass && !expanded} />
+      {showPointsPass ? <PointsPass overlapped={!!pass && !expanded} /> : null}
 
       <NetworksSheet
         visible={networksOpen}

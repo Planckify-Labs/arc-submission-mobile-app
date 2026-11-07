@@ -27,13 +27,17 @@
  */
 
 import { HTTPError } from "ky";
-import { type Address, encodeFunctionData, erc20Abi } from "viem";
+import { type Address, encodeFunctionData } from "viem";
 import type {
   ChainConfig,
   EvmChainConfig,
 } from "../../constants/configs/chainConfig.ts";
 import { FEATURE_EVM_ONCHAIN_SETTLEMENT_MAINNET } from "../../constants/configs/featureFlags.ts";
 import type { TWallet } from "../../constants/types/walletTypes.ts";
+import {
+  approveAndSend,
+  InsufficientFeeError,
+} from "../payments/approveAndSend.ts";
 import type { WalletKitAdapter } from "../walletKit/types.ts";
 import type { PaymentIntentResponse } from "./types.ts";
 
@@ -80,22 +84,7 @@ export class OnchainSettlementError extends Error {
   }
 }
 
-/**
- * The wallet cannot pay the network fee for this call. Thrown BEFORE the
- * tx is signed, with the real numbers, so the screen can say "needs about
- * 0.044 MON, this wallet has 0.023" instead of relaying the node's bare
- * "execution reverted" (Monad reports a fee shortfall that way).
- * `classifyPaymentError` maps the name to `insufficient_fee`.
- */
-export class InsufficientFeeError extends Error {
-  readonly name = "InsufficientFeeError";
-  constructor(
-    readonly feeWei: bigint,
-    readonly balanceWei: bigint,
-  ) {
-    super("Native balance cannot cover the transaction fee");
-  }
-}
+export { InsufficientFeeError };
 
 /**
  * Gas to price a `processMerchantPayment` at when the node won't estimate
@@ -158,32 +147,6 @@ export interface ExecuteOnchainSettlementArgs {
   sleep?: (ms: number) => Promise<void>;
 }
 
-/**
- * How long to wait for a just-mined approval to become visible on the
- * read path before paying. Monad blocks are sub-second; behind
- * load-balanced RPC upstreams a node can trail by a block or two, and
- * `waitForTransactionReceipt` only proves ONE node has it.
- */
-const ALLOWANCE_VISIBLE_ATTEMPTS = 10;
-const ALLOWANCE_VISIBLE_DELAY_MS = 700;
-/** One more try for the payment if gas estimation still saw the old state. */
-const PAYMENT_STALE_STATE_RETRY_DELAY_MS = 1_500;
-
-const defaultSleep = (ms: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-/**
- * viem wraps an `eth_estimateGas` / `eth_call` revert with no decodable
- * reason as "Execution reverted for an unknown reason" — which is what an
- * OpenZeppelin `ERC20InsufficientAllowance` looks like without the ABI.
- * Right after an approve that is the stale-node signature, not a real
- * refusal, so it earns exactly one retry.
- */
-function looksLikeStaleStateRevert(err: unknown): boolean {
-  const message = (err as { message?: string })?.message ?? "";
-  return /execution reverted|insufficient allowance/i.test(message);
-}
-
 export interface ExecuteOnchainSettlementResult {
   txHash: `0x${string}`;
   chainId: number;
@@ -224,7 +187,6 @@ export async function executeOnchainSettlement(
   args: ExecuteOnchainSettlementArgs,
 ): Promise<ExecuteOnchainSettlementResult> {
   const { intent, wallet, walletKit, chain, contractAddress } = args;
-  const sleep = args.sleep ?? defaultSleep;
 
   if (!intent.quoteCommitment || !intent.quoteSignature) {
     throw new OnchainSettlementError(
@@ -261,126 +223,24 @@ export async function executeOnchainSettlement(
   const isNativeToken =
     qc.tokenAddress === "0x0000000000000000000000000000000000000000";
 
-  // ERC-20 approval. `processMerchantPayment` pulls via `transferFrom`, so
-  // without an allowance the payment reverts — the header's "approval handled
-  // upstream" was aspirational; nothing upstream ever set one.
-  //
-  // This was survivable while EVM merchant payments were native-token only.
-  // It is not on a native-alias chain like Arc, where the contract refuses
-  // address(0) outright (`NativeDisabledOnAliasChain`) and the ERC-20 is the
-  // ONLY payable route, so every payment needs an allowance first.
-  //
-  // Approve exactly `qc.amount`, never unlimited: the user is confirming one
-  // payment of a known size, and the quote's own expiry bounds the window.
-  // A leftover allowance would outlive the intent it was granted for.
-  let approvedThisCall = false;
-  if (!isNativeToken) {
-    const amount = BigInt(qc.amount);
-    const token = qc.tokenAddress as Address;
-
-    // Presence-checked, per chain-extension discipline: a kit without these
-    // reads (non-EVM) never reaches here, since we already required
-    // `sendContractTransaction` and an eip155 chain above.
-    const allowance = walletKit.getTokenAllowance
-      ? await walletKit.getTokenAllowance({
-          owner: wallet.address,
-          spender: contractAddress,
-          tokenAddress: token,
-          chain,
-        })
-      : 0n;
-
-    if (allowance < amount) {
-      const approveHash = (await walletKit.sendContractTransaction({
-        wallet,
-        chain,
-        to: token,
-        data: encodeFunctionData({
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [contractAddress, amount],
-        }),
-        value: 0n,
-      })) as `0x${string}`;
-
-      // Must confirm before the payment is broadcast. Both land in the same
-      // block otherwise and `transferFrom` can execute against the old
-      // allowance, reverting the payment the user just authorized.
-      if (walletKit.waitForTransaction) {
-        await walletKit.waitForTransaction({ hash: approveHash, chain });
-      }
-
-      // A receipt proves one node mined it; the payment's gas estimation may
-      // be served by another that is a block behind and still sees the old
-      // allowance — that revert ("unknown reason") is exactly what a user
-      // hit on Monad Testnet on 2026-09-17. Don't broadcast until the read
-      // path agrees the allowance is there.
-      if (walletKit.getTokenAllowance) {
-        for (let attempt = 0; attempt < ALLOWANCE_VISIBLE_ATTEMPTS; attempt++) {
-          const visible = await walletKit.getTokenAllowance({
-            owner: wallet.address,
-            spender: contractAddress,
-            tokenAddress: token,
-            chain,
-          });
-          if (visible >= amount) break;
-          await sleep(ALLOWANCE_VISIBLE_DELAY_MS);
-        }
-      }
-      approvedThisCall = true;
-    }
-  }
-
+  // The approve -> confirm -> allowance-visible -> fee preflight -> broadcast
+  // sequence is shared with product checkout; see `payments/approveAndSend`.
+  // ERC-20 payments approve exactly `qc.amount`: the quote's own expiry
+  // bounds the window, and a leftover allowance would outlive the intent.
+  // Native payments (zero address) attach the amount as `msg.value` instead.
   const call = buildMerchantPaymentCall(intent, contractAddress);
-
-  // The fee is checked here, after any approve and right before signing,
-  // because this is the first moment both are known: the exact calldata
-  // (gas) and the current fee cap. A node asked to estimate WITH fee
-  // fields folds the balance check in and answers "execution reverted" —
-  // Monad in particular — which nothing downstream could name.
-  if (walletKit.estimateContractCallFee) {
-    let fee: { feeWei: bigint } | null = null;
-    let balance = 0n;
-    try {
-      [fee, balance] = await Promise.all([
-        walletKit.estimateContractCallFee({
-          from: wallet.address,
-          chain,
-          to: call.to,
-          data: call.data,
-          value: call.value,
-          fallbackGas: MERCHANT_PAYMENT_GAS_FALLBACK,
-        }),
-        walletKit.getNativeBalance(wallet.address, chain),
-      ]);
-    } catch {
-      // Couldn't price it (RPC hiccup): don't block on a guess, let the
-      // send speak for itself.
-    }
-    if (fee && balance < fee.feeWei + call.value) {
-      throw new InsufficientFeeError(fee.feeWei, balance);
-    }
-  }
-
-  const broadcastPayment = () =>
-    walletKit.sendContractTransaction?.({
-      wallet,
-      chain,
-      to: call.to,
-      data: call.data,
-      value: call.value,
-    }) as Promise<`0x${string}`>;
-
-  let txHash: `0x${string}`;
-  try {
-    txHash = await broadcastPayment();
-  } catch (err) {
-    // Only right after our own approve, and only for the revert shape a
-    // lagging node produces. Anything else (or a second failure) is real.
-    if (!approvedThisCall || !looksLikeStaleStateRevert(err)) throw err;
-    await sleep(PAYMENT_STALE_STATE_RETRY_DELAY_MS);
-    txHash = await broadcastPayment();
-  }
+  const txHash = await approveAndSend({
+    wallet,
+    walletKit,
+    chain,
+    call,
+    spender: contractAddress,
+    token: isNativeToken
+      ? undefined
+      : { address: qc.tokenAddress as Address, amount: BigInt(qc.amount) },
+    fallbackGas: MERCHANT_PAYMENT_GAS_FALLBACK,
+    sleep: args.sleep,
+  });
 
   return { txHash, chainId: chain.chain.id };
 }

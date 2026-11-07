@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { TProductVariant } from "@/api/types/product";
+import { useProductPrice } from "@/hooks/queries/useProductPrice";
 import {
   applyFacetFilter,
   buildFacetSections,
@@ -32,7 +33,12 @@ export function usePackageFilter(
   variants: TProductVariant[] | undefined,
   resetKey: string,
 ): UsePackageFilterResult {
-  const sections = useMemo(() => buildFacetSections(variants), [variants]);
+  const { mode, formatPrice } = useProductPrice();
+  const sections = useMemo(
+    () =>
+      buildFacetSections(variants, mode === "TOKEN" ? formatPrice : undefined),
+    [variants, mode, formatPrice],
+  );
 
   const [selection, setSelection] = useState<PpobFilterSelection>(
     emptySelection(),

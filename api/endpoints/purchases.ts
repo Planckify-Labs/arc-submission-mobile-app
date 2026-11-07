@@ -12,7 +12,7 @@ export const purchaseApi = {
         .json<TPurchaseResponse>();
       return response;
     } catch (error) {
-      console.error("Failed to create purchase:", error);
+      if (__DEV__) console.warn("Failed to create purchase:", error);
       throw error;
     }
   },
@@ -24,7 +24,7 @@ export const purchaseApi = {
         .json<TPurchaseResponse>();
       return response;
     } catch (error) {
-      console.error("Failed to fetch purchase by ID:", error);
+      if (__DEV__) console.warn("Failed to fetch purchase by ID:", error);
       throw error;
     }
   },
@@ -36,7 +36,7 @@ export const purchaseApi = {
         .json<TPurchaseResponse>();
       return response;
     } catch (error) {
-      console.error("Failed to fetch purchase:", error);
+      if (__DEV__) console.warn("Failed to fetch purchase:", error);
       throw error;
     }
   },
@@ -48,7 +48,7 @@ export const purchaseApi = {
         .json<TPurchaseResponse[]>();
       return response;
     } catch (error) {
-      console.error("Failed to fetch purchases for wallet:", error);
+      if (__DEV__) console.warn("Failed to fetch purchases for wallet:", error);
       throw error;
     }
   },

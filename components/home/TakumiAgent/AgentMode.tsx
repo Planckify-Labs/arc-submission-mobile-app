@@ -46,6 +46,7 @@ import type {
   ConversationListCache,
   StoredMessage,
 } from "@/hooks/queries/useConversations";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { useAgentBusyPublisher } from "@/hooks/useAgentBusy";
 import { useAgentConnectionPublisher } from "@/hooks/useAgentConnection";
 import { useAgentOnboarding } from "@/hooks/useAgentOnboarding";
@@ -296,6 +297,7 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
   } = useAgentOnboarding();
 
   const { activeWallet, activeChain, wallets } = useWallet();
+  const productPaymentMode = useProductPaymentMode();
   const { data: blockchains = [] } = useBlockchainsWithStorage({
     isActive: true,
   });
@@ -550,6 +552,7 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
       chain_symbol: symbol,
       label: activeWallet?.name,
       points_authenticated: pointsAuthenticated,
+      product_payment_mode: productPaymentMode,
       // What the user can actually reach, not just where they are
       // standing. Without this the model only ever saw the ACTIVE
       // namespace and happily proposed actions on chains a private-key
@@ -561,7 +564,13 @@ export default function AgentMode({ isActive = true }: TAgentModeProps) {
       // wire type while still sending the hint.
       ...({ capabilities } as { capabilities: readonly string[] }),
     };
-  }, [activeWallet, activeChain, pointsAuthenticated, wallets]);
+  }, [
+    activeWallet,
+    activeChain,
+    pointsAuthenticated,
+    productPaymentMode,
+    wallets,
+  ]);
 
   const chatListRef = useRef<any>(null);
 

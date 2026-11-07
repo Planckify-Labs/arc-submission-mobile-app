@@ -1,6 +1,7 @@
 import { FlashList } from "@shopify/flash-list";
 import React, { useMemo } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { useRecommendations } from "@/hooks/queries/useProducts";
 import { useAddressBook } from "@/hooks/useAddressBook";
 
@@ -9,6 +10,7 @@ export interface QuickPromptsProps {
 }
 
 export default function QuickPrompts({ onSelectPrompt }: QuickPromptsProps) {
+  const mode = useProductPaymentMode();
   const { allContacts } = useAddressBook();
   const { data: recommendations } = useRecommendations(1);
 
@@ -33,20 +35,31 @@ export default function QuickPrompts({ onSelectPrompt }: QuickPromptsProps) {
       ? [
           {
             id: "redeem-1",
-            prompt: `Redeem ${recommendations[0].name} with my points`,
+            prompt:
+              mode === "TOKEN"
+                ? `Buy ${recommendations[0].name}`
+                : `Redeem ${recommendations[0].name} with my points`,
           },
         ]
       : [];
 
-    const staticPrompts = [
-      { id: "static-1", prompt: "how many points do i have?" },
-      { id: "static-2", prompt: "items i can redeem with my points" },
-      { id: "static-3", prompt: "Swap 1 ETH for USDC" },
-      { id: "static-4", prompt: "Set up a DeFi strategy" },
-    ];
+    const staticPrompts =
+      mode === "TOKEN"
+        ? [
+            { id: "static-1", prompt: "what's my balance?" },
+            { id: "static-2", prompt: "what products can I buy?" },
+            { id: "static-3", prompt: "Swap 1 ETH for USDC" },
+            { id: "static-4", prompt: "Set up a DeFi strategy" },
+          ]
+        : [
+            { id: "static-1", prompt: "how many points do i have?" },
+            { id: "static-2", prompt: "items i can redeem with my points" },
+            { id: "static-3", prompt: "Swap 1 ETH for USDC" },
+            { id: "static-4", prompt: "Set up a DeFi strategy" },
+          ];
 
     return [...transferPrompt, ...redeemPrompt, ...staticPrompts].slice(0, 5);
-  }, [allContacts, recommendations]);
+  }, [allContacts, recommendations, mode]);
 
   return (
     <View className="py-5 bg-light-main-container mb-[47px]">

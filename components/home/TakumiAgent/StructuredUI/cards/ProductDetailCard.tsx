@@ -4,7 +4,7 @@ import type React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import OptimizedImage from "@/components/common/OptimizedImage";
 import SingleLoadingSekeleton from "@/components/common/SingleLoadingSekeleton";
-import { formatPoints } from "@/services/catalog/catalogDisplay";
+import { useProductPrice } from "@/hooks/queries/useProductPrice";
 import type { ToolComponentProps } from "../types";
 
 /**
@@ -52,24 +52,31 @@ type DetailOutput = {
 const BRAND_RED = "#c71c4b";
 
 /** Lowest active price across a variant's prices, formatted ("2,300 pts"). */
-function variantPriceLabel(variant: DetailVariant): string | null {
+type FormatPrice = ReturnType<typeof useProductPrice>["formatPrice"];
+
+function variantPriceLabel(
+  variant: DetailVariant,
+  formatPrice: FormatPrice,
+): string | null {
   let min: number | null = null;
   for (const p of variant.prices ?? []) {
     if (p.is_active === false) continue;
     const n = Number(p.sell_price);
     if (Number.isFinite(n) && (min === null || n < min)) min = n;
   }
-  return min === null ? null : formatPoints(String(min));
+  return min === null ? null : formatPrice(min, { compact: true });
 }
 
 function VariantRow({
   variant,
+  formatPrice,
   onPress,
 }: {
   variant: DetailVariant;
+  formatPrice: FormatPrice;
   onPress: () => void;
 }) {
-  const price = variantPriceLabel(variant);
+  const price = variantPriceLabel(variant, formatPrice);
   return (
     <TouchableOpacity
       activeOpacity={0.7}
@@ -97,6 +104,7 @@ function VariantRow({
 const ProductDetailCard: React.FC<
   ToolComponentProps<DetailInput, DetailOutput>
 > = ({ state, output }) => {
+  const { formatPrice } = useProductPrice();
   if (state === "input-streaming" || state === "input-available" || !output) {
     return (
       <View className="my-1.5 rounded-2xl border border-light-matte-black/10 bg-white px-3.5 py-3 gap-3">
@@ -191,7 +199,12 @@ const ProductDetailCard: React.FC<
       {variants.length > 0 ? (
         <View className="gap-2">
           {variants.map((v) => (
-            <VariantRow key={v.id} variant={v} onPress={open} />
+            <VariantRow
+              key={v.id}
+              variant={v}
+              formatPrice={formatPrice}
+              onPress={open}
+            />
           ))}
         </View>
       ) : (

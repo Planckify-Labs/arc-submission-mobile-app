@@ -3,6 +3,8 @@ import React from "react";
 import { Text, View } from "react-native";
 import { TTransaction } from "@/api/types/transaction";
 import OptimizedImage from "@/components/common/OptimizedImage";
+import { useProductPrice } from "@/hooks/queries/useProductPrice";
+import { transferFiatText } from "@/services/catalog/usdPrice";
 import { formatExactTokenAmount } from "@/utils/tokenAmount";
 
 interface TransferDetailHeadingProps {
@@ -18,6 +20,9 @@ export default function TransferDetailHeading({
     transfer.amount,
     transfer.token?.decimals,
   );
+
+  const { mode, idrPerUsd } = useProductPrice();
+  const fiatText = transferFiatText(transfer, mode, idrPerUsd);
 
   return (
     <View className="items-center mb-6">
@@ -42,9 +47,9 @@ export default function TransferDetailHeading({
       <Text className="text-light-matte-black/70 text-base mb-3 text-center font-medium">
         Transfer Amount
       </Text>
-      {transfer.amountInFiat && (
+      {fiatText && (
         <Text className="text-light-matte-black/70 text-sm mb-3 text-center">
-          ≈ {transfer.fiatCurrency} {transfer.amountInFiat}
+          ≈ {fiatText}
         </Text>
       )}
     </View>

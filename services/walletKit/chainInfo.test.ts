@@ -28,6 +28,7 @@ import {
   matchesBlockchainRow,
   preferredChainRail,
   supportsPointDeposit,
+  supportsProductPayment,
 } from "./chainInfo.ts";
 import { createEvmWalletKit } from "./evm/EvmWalletKit.ts";
 import { walletKitRegistry } from "./registry.ts";
@@ -207,6 +208,14 @@ describe("chainInfo.supportsPointDeposit", () => {
       }),
       false,
     );
+  });
+});
+
+describe("chainInfo.supportsProductPayment", () => {
+  it("true on the EVM kit only", () => {
+    assert.equal(supportsProductPayment(ethereumChain), true);
+    assert.equal(supportsProductPayment(solanaMainnet), false);
+    assert.equal(supportsProductPayment(suiTestnet), false);
   });
 });
 

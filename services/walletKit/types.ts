@@ -1567,6 +1567,14 @@ export interface WalletKitAdapter {
    */
   supportsPointDeposit?: boolean;
   /**
+   * Whether this chain family can pay for a catalog product on-chain
+   * (`TakumiPay.createTransaction` after `POST /bookings`). EVM only for now.
+   * Shared code reads it via `chainInfo#supportsProductPayment` so checkout
+   * never tests namespaces; it needs `sendContractTransaction`,
+   * `getTokenAllowance`, `waitForTransaction` and `estimateContractCallFee`.
+   */
+  supportsProductPayment?: boolean;
+  /**
    * Executes an "Add Points" deposit into the chain's `takumi_pay` contract
    * and returns the transaction hash the API verifies against `refId`.
    * Implemented by kits whose deposit needs no ERC-20 approval step (Stellar,

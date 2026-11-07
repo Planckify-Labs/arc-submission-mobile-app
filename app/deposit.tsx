@@ -1,4 +1,5 @@
 import { useIsFocused } from "@react-navigation/native";
+import { Redirect } from "expo-router";
 import { ChevronDown } from "lucide-react-native";
 import React, { useCallback, useRef, useState } from "react";
 import {
@@ -31,6 +32,7 @@ import {
 import TokenSelectorModal from "@/components/wallet/TokenSelectorModal";
 import WalletSelectorModal from "@/components/wallet/WalletSelectorModal";
 import { useDepositState } from "@/hooks/deposit/useDepositState";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { useGoToAuth } from "@/hooks/useGoToAuth";
 import { useNavigationReady } from "@/hooks/useNavigationReady";
 import { useWallet } from "@/hooks/useWallet";
@@ -343,6 +345,10 @@ export default function DepositScreen() {
   const ready = useNavigationReady();
   const { top, bottom } = useSafeAreaInsets();
   const bottomOffset = Platform.OS === "ios" ? 0 : bottom > 0 ? bottom : 0;
+  const mode = useProductPaymentMode();
+
+  // Points aren't sold in TOKEN mode, so a stale link must not reach this form.
+  if (mode === "TOKEN") return <Redirect href="/add-funds" />;
 
   return (
     <>

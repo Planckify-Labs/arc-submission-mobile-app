@@ -64,6 +64,16 @@ export function supportsPointDeposit(chain: ChainConfig): boolean {
 }
 
 /**
+ * True when `chain`'s family can pay for a catalog product on-chain
+ * (`WalletKitAdapter#supportsProductPayment`). Checkout gates on this and
+ * shows a "switch network" state otherwise.
+ */
+export function supportsProductPayment(chain: ChainConfig): boolean {
+  if (!walletKitRegistry.has(chain.namespace)) return false;
+  return walletKitRegistry.get(chain.namespace).supportsProductPayment === true;
+}
+
+/**
  * EVM-typed convenience — returns the viem `chain.id` number, or
  * `undefined` for anything non-EVM. Direct drop-in for call sites doing
  * `activeChain.namespace === "eip155" ? activeChain.chain.id : undefined`.

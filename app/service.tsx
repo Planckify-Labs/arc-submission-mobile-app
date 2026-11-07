@@ -11,6 +11,8 @@ import ServiceHeader from "@/components/service/ServiceHeader";
 import ServiceScreenSkeleton from "@/components/service/ServiceScreenSkeleton";
 import ServiceSectionContainer from "@/components/service/ServiceSectionContainer";
 import ServiceStateMessage from "@/components/service/ServiceStateMessage";
+import { PRODUCT_PAYMENT_COPY } from "@/constants/configs/productPayment";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { useProductsByCategories } from "@/hooks/queries/useProducts";
 
 type ListItem =
@@ -44,6 +46,8 @@ type ListItem =
     };
 
 export default function ServiceScreen() {
+  const mode = useProductPaymentMode();
+  const copy = PRODUCT_PAYMENT_COPY[mode];
   const [searchQuery, setSearchQuery] = useState("");
   const scrollY = useRef(new Animated.Value(0)).current;
   const {
@@ -66,7 +70,7 @@ export default function ServiceScreen() {
     {
       type: "header",
       data: {
-        title: "Redeem",
+        title: copy.serviceTitle,
       },
     },
     {
@@ -123,7 +127,7 @@ export default function ServiceScreen() {
 
   const renderServiceScreenItem = ({ item }: ListRenderItemInfo<ListItem>) => {
     if (item.type === "header") {
-      return <ServiceHeader title="Redeem" />;
+      return <ServiceHeader title={copy.serviceTitle} />;
     } else if (item.type === "searchBar") {
       return (
         <SearchBar
@@ -172,7 +176,7 @@ export default function ServiceScreen() {
           className="flex-1 bg-light-main-container"
           edges={["top"]}
         >
-          <ServiceHeader title="Redeem" />
+          <ServiceHeader title={copy.serviceTitle} />
           <ServiceStateMessage
             variant={error ? "error" : "empty"}
             onRetry={() => {

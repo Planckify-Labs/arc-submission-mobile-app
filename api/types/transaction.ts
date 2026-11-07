@@ -53,6 +53,8 @@ export interface TPurchase {
   vendorStatusResponse?: any;
   vendorRefId: string | null;
   refId?: string;
+  /** Points spent toward this purchase; "0"/absent when none. */
+  pointsApplied?: string;
   createdAt: string;
   updatedAt: string;
   productVariant: TProductVariantInPurchase;

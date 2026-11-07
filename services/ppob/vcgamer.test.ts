@@ -239,6 +239,19 @@ describe("buildFacetSections", () => {
     expect(family.options.map((o) => o.label)).toContain("Freedom Internet");
   });
 
+  it("labels price chips with the caller's formatter", () => {
+    const sections = buildFacetSections(dataVariants, (n) => `$${n / 1000}`);
+    const price = sections.find((s) => s.kind === "price")!;
+    expect(price.options.length).toBeGreaterThan(0);
+    for (const o of price.options) expect(o.label).toContain("$");
+  });
+
+  it("offers no price chips when the formatter has no rate", () => {
+    const sections = buildFacetSections(dataVariants, () => null);
+    const price = sections.find((s) => s.kind === "price");
+    expect(price?.options ?? []).toHaveLength(0);
+  });
+
   it("omits the family section on the pulsa tab (no data variants)", () => {
     const pulsa = [
       priced("Pulsa Reguler 5.000", 6000),

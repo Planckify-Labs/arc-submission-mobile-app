@@ -15,6 +15,9 @@ import { Text, TouchableOpacity, View } from "react-native";
 import { formatUnits } from "viem";
 import type { TPurchaseResponse } from "@/api/types/purchase";
 import type { TRedemptionDetail } from "@/api/types/redeem";
+import { pointsAppliedNumber } from "@/services/productPay/receipt";
+import { showsProductIdr } from "@/services/catalog/usdPrice";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { formatCurrency } from "@/utils/currencyUtils";
 import { formatDate } from "@/utils/dateUtils";
 import {
@@ -280,6 +283,11 @@ export default function PurchasedProductDetailCard({
   }
 
   if (!purchase) return null;
+  return <PurchaseDetailCard purchase={purchase} />;
+}
+
+function PurchaseDetailCard({ purchase }: { purchase: TPurchaseResponse }) {
+  const mode = useProductPaymentMode();
   const openBlockchainExplorer = async (
     txHash: string,
     explorerUrl: string,
@@ -444,17 +452,34 @@ export default function PurchasedProductDetailCard({
               </View>
             </View>
 
-            <View className="flex-row justify-between items-center">
-              <Text className="text-light-matte-black/60 text-sm">
-                Fiat Amount
-              </Text>
-              <Text className="text-light-matte-black text-sm font-medium">
-                {formatCurrency({
-                  amount: purchase.transaction.amountInFiat,
-                  currency: purchase.transaction.fiatCurrency,
-                })}
-              </Text>
-            </View>
+            {/* TOKEN mode shows no Rupiah on a product purchase. */}
+            {pointsAppliedNumber(purchase.pointsApplied) > 0 && (
+              <View className="flex-row justify-between items-center">
+                <Text className="text-light-matte-black/60 text-sm">
+                  Points Applied
+                </Text>
+                <Text className="text-light-matte-black text-sm font-medium">
+                  {pointsAppliedNumber(purchase.pointsApplied).toLocaleString(
+                    "en-US",
+                  )}{" "}
+                  points
+                </Text>
+              </View>
+            )}
+
+            {showsProductIdr(mode) && (
+              <View className="flex-row justify-between items-center">
+                <Text className="text-light-matte-black/60 text-sm">
+                  Fiat Amount
+                </Text>
+                <Text className="text-light-matte-black text-sm font-medium">
+                  {formatCurrency({
+                    amount: purchase.transaction.amountInFiat,
+                    currency: purchase.transaction.fiatCurrency,
+                  })}
+                </Text>
+              </View>
+            )}
 
             <View className="flex-row justify-between items-center">
               <Text className="text-light-matte-black/60 text-sm">Network</Text>

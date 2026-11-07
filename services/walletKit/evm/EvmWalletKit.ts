@@ -164,6 +164,9 @@ export function createEvmWalletKit(): WalletKitAdapter {
     // `TakumiPay.depositPoints` — the ERC-20 approve + deposit path in
     // `hooks/deposit/useDepositState.ts`.
     supportsPointDeposit: true,
+    // `TakumiPay.createTransaction` — product checkout in
+    // `services/productPay/`.
+    supportsProductPayment: true,
     displayName: "Ethereum",
     brandColor: "#627EEA",
     // Connect binds a wallet to an origin and is the gate every later

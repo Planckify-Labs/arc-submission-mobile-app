@@ -89,10 +89,10 @@ export default function InsufficientFundsModal({
     }
   }, [visible, animateOpenModal]);
 
-  const handleDeposit = useCallback(() => {
+  const handleAddFunds = useCallback(() => {
     animateCloseModal();
     setTimeout(() => {
-      router.push("/deposit");
+      router.push("/add-funds");
     }, 250);
   }, [animateCloseModal]);
 
@@ -221,12 +221,12 @@ export default function InsufficientFundsModal({
 
               <Pressable
                 className="flex-1 border-4 border-light-primary-red bg-white p-4 rounded-full shadow-md"
-                onPress={handleDeposit}
+                onPress={handleAddFunds}
               >
                 <View className="flex-row items-center justify-center">
                   <DepositIcon width={18} height={18} color="#ffffff" />
                   <Text className="text-light-primary-red font-bold text-sm ml-1">
-                    Deposit
+                    Add funds
                   </Text>
                 </View>
               </Pressable>

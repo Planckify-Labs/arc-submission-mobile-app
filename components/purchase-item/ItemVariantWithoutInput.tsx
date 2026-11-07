@@ -2,6 +2,8 @@ import { router, useFocusEffect } from "expo-router";
 import { ArrowLeft, Info } from "lucide-react-native";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, Text, TouchableOpacity, View } from "react-native";
+import { PRODUCT_PAYMENT_COPY } from "@/constants/configs/productPayment";
+import { useProductPrice } from "@/hooks/queries/useProductPrice";
 import { useProductById } from "@/hooks/queries/useProducts";
 import LoadinngSpinnerPopup from "../common/LoadinngSpinnerPopup";
 import OptimizedImage from "../common/OptimizedImage";
@@ -14,6 +16,8 @@ interface ItemVariantWithoutInputProps {
 export default function ItemWithoutInput({
   productId,
 }: ItemVariantWithoutInputProps) {
+  const { mode, priceText } = useProductPrice();
+  const copy = PRODUCT_PAYMENT_COPY[mode];
   const isMounted = useRef(true);
   const { data: product, isLoading, error } = useProductById(productId || "");
   const [selectedItemVariant, setSelectedItemVariant] = useState<string | null>(
@@ -105,7 +109,7 @@ export default function ItemWithoutInput({
                     {variant.name}
                   </Text>
                   <Text className="text-light-primary-red font-bold text-lg">
-                    {parseInt(price).toLocaleString()} points
+                    {priceText(price)}
                   </Text>
                   <Text className="text-light-matte-black/70 text-xs mt-1">
                     {variant.description}
@@ -143,8 +147,7 @@ export default function ItemWithoutInput({
             <View className="flex-row items-start">
               <Info size={18} color="#c71c4b" className="mr-2 mt-0.5" />
               <Text className="text-light-matte-black/80 text-sm flex-1">
-                This redemption will be linked to your account and cannot be
-                transferred.
+                {copy.linkedNotice} transferred.
               </Text>
             </View>
           </View>
@@ -193,15 +196,15 @@ export default function ItemWithoutInput({
           }}
         >
           <Text className="text-light font-bold text-lg">
-            Redeem with Points
+            {copy.continueCta}
           </Text>
         </TouchableOpacity>
       </View>
 
       <LoadinngSpinnerPopup
         visible={isNavigating}
-        title="Preparing Redemption"
-        message="Please wait while we prepare your redemption..."
+        title={copy.preparingTitle}
+        message={copy.preparingMessage}
       />
     </ScrollView>
   );

@@ -15,7 +15,14 @@ export type AnalyticsEventProps = {
   bill_payment_completed: {
     product_category?: string;
     points_spent?: number;
+    payment_method?: "token" | "points";
   };
+  /**
+   * A product payment is on chain but the API will never accept its
+   * registration (repeated 4xx, or aged out). `reason` is the outbox's fixed
+   * `lastError` label ("http 400", "expired"): no wallet, no hash.
+   */
+  purchase_registration_rejected: { reason: string };
   /**
    * The signing re-quote refused a route the user had approved. `reason`:
    * `floor_not_met` (the fresh guaranteed minimum fell below the approved

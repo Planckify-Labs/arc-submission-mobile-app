@@ -10,7 +10,8 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ONBOARDING_SLIDE_DATA } from "../../../../constants/agentModeOnboarding/onboardingSlideData";
+import { getOnboardingSlideData } from "../../../../constants/agentModeOnboarding/onboardingSlideData";
+import { useProductPaymentMode } from "../../../../hooks/queries/useProductPaymentMode";
 import OnboardingSlide from "./OnboardingSlide";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -24,6 +25,8 @@ export default function AgentOnboarding({
   visible,
   onComplete,
 }: AgentOnboardingProps) {
+  const mode = useProductPaymentMode();
+  const slides = getOnboardingSlideData(mode);
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollViewRef = useRef<ScrollView>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -42,7 +45,7 @@ export default function AgentOnboarding({
   );
 
   const handleNext = () => {
-    if (currentIndex < ONBOARDING_SLIDE_DATA.length - 1) {
+    if (currentIndex < slides.length - 1) {
       scrollViewRef.current?.scrollTo({
         x: SCREEN_WIDTH * (currentIndex + 1),
         animated: true,
@@ -96,7 +99,7 @@ export default function AgentOnboarding({
           scrollEventThrottle={16}
           className="flex-1 pt-8"
         >
-          {ONBOARDING_SLIDE_DATA.map((slide, index) => (
+          {slides.map((slide, index) => (
             <OnboardingSlide key={index} {...slide} slideIndex={index} />
           ))}
         </ScrollView>
@@ -107,7 +110,7 @@ export default function AgentOnboarding({
         >
           <View className="flex-row items-center justify-between">
             <View className="flex-row items-center">
-              {ONBOARDING_SLIDE_DATA.map((_, index) => {
+              {slides.map((_, index) => {
                 const inputRange = [
                   (index - 1) * SCREEN_WIDTH,
                   index * SCREEN_WIDTH,
@@ -149,9 +152,7 @@ export default function AgentOnboarding({
               }}
             >
               <Text className="text-white font-semibold text-[15px] mr-2">
-                {currentIndex === ONBOARDING_SLIDE_DATA.length - 1
-                  ? "Get Started"
-                  : "Next"}
+                {currentIndex === slides.length - 1 ? "Get Started" : "Next"}
               </Text>
               <ArrowRight size={18} color="#ffffff" strokeWidth={2.5} />
             </TouchableOpacity>

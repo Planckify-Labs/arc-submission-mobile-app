@@ -58,6 +58,12 @@ export interface WalletContext {
    */
   points_authenticated?: boolean;
   /**
+   * How products are priced and paid for on this build right now. `TOKEN`
+   * means checkout is a stablecoin purchase; `POINTS` means point redemption.
+   * Comes from `GET /app-config`. Omitted by older clients.
+   */
+  product_payment_mode?: "TOKEN" | "POINTS";
+  /**
    * Every namespace the device actually holds a wallet on.
    *
    * `namespace` above describes only the ACTIVE wallet, which told the
