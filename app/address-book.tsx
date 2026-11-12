@@ -9,7 +9,7 @@ import {
   Shield,
   X,
 } from "lucide-react-native";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,12 +19,10 @@ import {
   RefreshControl,
   Text,
   TextInput,
-  ToastAndroid,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SystemBars } from "react-native-edge-to-edge";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -32,6 +30,7 @@ import {
 import type { TCreateAddressBookDto } from "@/api/types/addressBook";
 import AddContactModal from "@/components/address-book/AddContactModal";
 import AddressBookItem from "@/components/address-book/AddressBookItem";
+import ContactActionsSheet from "@/components/address-book/ContactActionsSheet";
 import EmptyState from "@/components/address-book/EmptyState";
 import type { TAddressBookEntry } from "@/constants/types/addressBookTypes";
 import { useIsAuthenticated } from "@/hooks/queries/useAuth";
@@ -85,22 +84,71 @@ export default function AddressBook() {
   const { bottom } = useSafeAreaInsets();
   const bottomOffset = Platform.OS === "ios" ? 0 : bottom > 0 ? bottom : 16;
 
-  const handleCopy = useCallback(async (address: string) => {
-    await Clipboard.setStringAsync(address);
-    if (Platform.OS === "android") {
-      ToastAndroid.show("Address copied", ToastAndroid.SHORT);
-    } else {
-      Alert.alert("Copied", "Address copied to clipboard", [{ text: "OK" }]);
-    }
+  // Copy feedback is inline (the row / sheet button flips to "Copied" for a
+  // moment) instead of a toast or an Alert the user has to dismiss.
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
+  const handleCopy = useCallback(async (entry: TAddressBookEntry) => {
+    await Clipboard.setStringAsync(entry.address);
+    if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    setCopiedId(entry.id);
+    copiedTimer.current = setTimeout(() => setCopiedId(null), 1500);
   }, []);
 
-  const handleEdit = useCallback((entry: TAddressBookEntry) => {
-    setEditingEntry(entry);
-    setShowModal(true);
+  // Contact action sheet. `sheetEntry` outlives `sheetOpen` so the sheet keeps
+  // its content through the close animation; follow-up actions that open
+  // another modal (edit form, delete confirm) or navigate wait for the sheet
+  // to finish closing, so two modals never animate at once.
+  const [sheetEntry, setSheetEntry] = useState<TAddressBookEntry | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const afterSheetClose = useRef<(() => void) | null>(null);
+
+  const handleOpenSheet = useCallback((entry: TAddressBookEntry) => {
+    afterSheetClose.current = null;
+    setSheetEntry(entry);
+    setSheetOpen(true);
   }, []);
 
-  const handleDelete = useCallback(
-    (id: string) => {
+  const closeSheetThen = useCallback((action: () => void) => {
+    afterSheetClose.current = action;
+    setSheetOpen(false);
+  }, []);
+
+  const handleSheetClosed = useCallback(() => {
+    setSheetEntry(null);
+    const action = afterSheetClose.current;
+    afterSheetClose.current = null;
+    action?.();
+  }, []);
+
+  const handleSend = useCallback(() => {
+    if (!sheetEntry) return;
+    const recipientAddress = sheetEntry.address;
+    closeSheetThen(() =>
+      router.push({ pathname: "/send", params: { recipientAddress } }),
+    );
+  }, [sheetEntry, closeSheetThen]);
+
+  const handleEdit = useCallback(() => {
+    if (!sheetEntry) return;
+    const entry = sheetEntry;
+    closeSheetThen(() => {
+      setEditingEntry(entry);
+      setShowModal(true);
+    });
+  }, [sheetEntry, closeSheetThen]);
+
+  const handleDelete = useCallback(() => {
+    if (!sheetEntry) return;
+    const { id } = sheetEntry;
+    closeSheetThen(() =>
       Alert.alert(
         "Delete Contact",
         "Remove this contact from your address book?",
@@ -108,10 +156,9 @@ export default function AddressBook() {
           { text: "Cancel", style: "cancel" },
           { text: "Delete", style: "destructive", onPress: () => remove(id) },
         ],
-      );
-    },
-    [remove],
-  );
+      ),
+    );
+  }, [sheetEntry, closeSheetThen, remove]);
 
   const handleCloseModal = useCallback(() => {
     setShowModal(false);
@@ -142,16 +189,15 @@ export default function AddressBook() {
   }, [refetch]);
 
   const renderItem = useCallback(
-    ({ item, index }: { item: TAddressBookEntry; index: number }) => (
+    ({ item }: { item: TAddressBookEntry }) => (
       <AddressBookItem
         entry={item}
-        index={index}
-        onEdit={handleEdit}
-        onDelete={handleDelete}
+        copied={copiedId === item.id}
+        onPress={handleOpenSheet}
         onCopy={handleCopy}
       />
     ),
-    [handleEdit, handleDelete, handleCopy],
+    [copiedId, handleOpenSheet, handleCopy],
   );
 
   const keyExtractor = useCallback((item: TAddressBookEntry) => item.id, []);
@@ -166,7 +212,7 @@ export default function AddressBook() {
   // wait for the loading state to resolve.
   if (isAuthenticated !== true && !hadPreviousSession) {
     return (
-      <GestureHandlerRootView className="flex-1">
+      <View className="flex-1">
         <SystemBars style="dark" />
         <SafeAreaView
           edges={["top"]}
@@ -271,12 +317,12 @@ export default function AddressBook() {
             </View>
           </View>
         </SafeAreaView>
-      </GestureHandlerRootView>
+      </View>
     );
   }
 
   return (
-    <GestureHandlerRootView className="flex-1">
+    <View className="flex-1">
       <SystemBars style="dark" />
       <SafeAreaView
         edges={["top"]}
@@ -284,59 +330,62 @@ export default function AddressBook() {
         style={{ paddingBottom: bottomOffset }}
       >
         {/* Header */}
-        <View className="px-4 pt-2 pb-4">
-          <View className="flex-row items-center justify-between mb-1">
-            <View className="flex-row items-center gap-3 flex-1">
-              <Pressable
-                onPress={() => router.back()}
-                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-                className="w-9 h-9 rounded-xl bg-light items-center justify-center shadow-sm"
-              >
-                <ArrowLeft size={18} color="#c71c4b" />
-              </Pressable>
-              <View className="flex-1">
-                <Text
-                  className="text-light-matte-black text-2xl font-bold tracking-tight"
-                  numberOfLines={1}
-                >
-                  Address Book
-                </Text>
-                <Text className="text-light-matte-black/50 text-xs">
-                  {contacts.length === 0 && !search
-                    ? "No contacts saved"
-                    : `${contacts.length} contact${contacts.length !== 1 ? "s" : ""}`}
-                </Text>
-              </View>
-            </View>
-
+        <View className="px-4 pt-2 pb-3">
+          <View className="flex-row items-center gap-3">
+            <Pressable
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+              hitSlop={{ top: 4, right: 4, bottom: 4, left: 4 }}
+              className="w-11 h-11 rounded-[14px] bg-light border border-[#e6e8ee] items-center justify-center"
+            >
+              <ArrowLeft size={18} color="#20222c" />
+            </Pressable>
+            <Text
+              className="flex-1 text-light-matte-black text-[22px] font-bold tracking-tight"
+              numberOfLines={1}
+            >
+              Address Book
+            </Text>
             <Pressable
               onPress={handleOpenAdd}
-              className="w-10 h-10 rounded-[13px] bg-light-primary-red items-center justify-center shadow-md"
-              style={{ shadowColor: "#c71c4b" }}
+              accessibilityRole="button"
+              accessibilityLabel="Add contact"
+              className="h-11 pl-3 pr-3.5 rounded-[14px] bg-light-primary-red flex-row items-center active:opacity-80"
             >
-              <Plus size={20} color="white" />
+              <Plus size={18} color="white" strokeWidth={2.2} />
+              <Text className="text-white text-sm font-semibold ml-1.5">
+                Add
+              </Text>
             </Pressable>
           </View>
 
           {/* Search bar */}
-          <View className="mt-3 flex-row items-center bg-light rounded-2xl px-[14px] shadow-sm">
-            <Search size={16} color="#20222c50" />
+          <View
+            className={`mt-4 h-[46px] flex-row items-center bg-light rounded-[14px] pl-3.5 pr-1.5 border ${
+              search ? "border-light-primary-red" : "border-[#e6e8ee]"
+            }`}
+          >
+            <Search size={16} color={search ? "#20222c" : "#6b6d76"} />
             <TextInput
               ref={searchRef}
               value={search}
               onChangeText={setSearch}
-              placeholder="Search by name, address or ENS..."
-              placeholderTextColor="#20222c40"
+              placeholder="Search name, address or ENS"
+              placeholderTextColor="#6b6d76"
               autoCapitalize="none"
               autoCorrect={false}
-              className="flex-1 ml-[10px] py-[13px] text-sm text-light-matte-black"
+              accessibilityLabel="Search contacts"
+              className="flex-1 ml-2.5 py-0 text-sm text-light-matte-black"
             />
             {!!search && (
               <Pressable
                 onPress={() => setSearch("")}
-                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
+                className="w-9 h-9 items-center justify-center"
               >
-                <X size={16} color="#20222c60" />
+                <X size={16} color="#5f616b" />
               </Pressable>
             )}
           </View>
@@ -344,28 +393,28 @@ export default function AddressBook() {
 
         {/* List */}
         {/*
-          Windowing props below are the real fix for the "back nav feels
-          laggy" bug. Each `AddressBookItem` owns two reanimated shared
-          values, two `useAnimatedStyle` hooks, a Pan gesture handler,
-          and a `FadeInDown` entering animation. FlatList defaults mount
-          ~21 viewports worth of rows; on a 30+ contact list that's 30
-          reanimated trees living in memory. When the native stack
-          starts the back transition, React has to tear all of them
-          down on the JS thread while the UI thread runs the slide
-          animation — they contend for frames and the transition looks
-          janky. Tightening the window to ~2 viewports + clipping
-          offscreen rows cuts the teardown cost dramatically.
+          Rows are plain views now (no reanimated entrance, no swipe
+          gesture), but the tight window still keeps back-navigation
+          teardown cheap on long contact lists.
         */}
         <FlatList
           data={contacts}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
+          extraData={copiedId}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
             paddingTop: 4,
             paddingBottom: 24,
             flexGrow: 1,
           }}
+          ListHeaderComponent={
+            contacts.length > 0 ? (
+              <Text className="px-5 pb-2 text-xs font-semibold uppercase tracking-wider text-[#5f616b]">
+                {`${contacts.length} contact${contacts.length !== 1 ? "s" : ""}`}
+              </Text>
+            ) : null
+          }
           ListEmptyComponent={<EmptyState isSearching={!!search} />}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
@@ -383,15 +432,26 @@ export default function AddressBook() {
           }
         />
 
-        {/* Swipe hint */}
         {contacts.length > 0 && (
           <View className="pb-2 items-center">
-            <Text className="text-[11px] text-light-matte-black/25">
-              Swipe left on a contact to edit or delete
+            <Text className="text-xs text-[#6b6d76]">
+              Tap a contact to send, edit or delete
             </Text>
           </View>
         )}
       </SafeAreaView>
+
+      <ContactActionsSheet
+        visible={sheetOpen}
+        entry={sheetEntry}
+        copied={!!sheetEntry && copiedId === sheetEntry.id}
+        onClose={() => setSheetOpen(false)}
+        onClosed={handleSheetClosed}
+        onSend={handleSend}
+        onCopy={() => sheetEntry && handleCopy(sheetEntry)}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+      />
 
       <AddContactModal
         visible={showModal}
@@ -401,6 +461,6 @@ export default function AddressBook() {
         isSaving={isAdding || isUpdating}
         saveError={addError as Error | null}
       />
-    </GestureHandlerRootView>
+    </View>
   );
 }

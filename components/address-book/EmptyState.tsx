@@ -1,6 +1,5 @@
 import { BookUser } from "lucide-react-native";
 import { Text, View } from "react-native";
-import Animated, { FadeIn } from "react-native-reanimated";
 
 type EmptyStateProps = {
   isSearching: boolean;
@@ -8,52 +7,18 @@ type EmptyStateProps = {
 
 export default function EmptyState({ isSearching }: EmptyStateProps) {
   return (
-    <Animated.View
-      entering={FadeIn.duration(400)}
-      style={{
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        paddingHorizontal: 40,
-        paddingTop: 60,
-      }}
-    >
-      <View
-        style={{
-          width: 72,
-          height: 72,
-          borderRadius: 22,
-          backgroundColor: "#c71c4b12",
-          alignItems: "center",
-          justifyContent: "center",
-          marginBottom: 16,
-        }}
-      >
+    <View className="flex-1 items-center justify-center px-10 pt-[60px]">
+      <View className="w-[72px] h-[72px] rounded-[22px] bg-light-primary-red/10 items-center justify-center mb-4">
         <BookUser size={32} color="#c71c4b" />
       </View>
-      <Text
-        style={{
-          fontSize: 18,
-          fontWeight: "700",
-          color: "#20222c",
-          textAlign: "center",
-          marginBottom: 8,
-        }}
-      >
+      <Text className="text-lg font-bold text-light-matte-black text-center mb-2">
         {isSearching ? "No results found" : "No contacts yet"}
       </Text>
-      <Text
-        style={{
-          fontSize: 14,
-          color: "#20222c70",
-          textAlign: "center",
-          lineHeight: 20,
-        }}
-      >
+      <Text className="text-sm leading-5 text-[#5f616b] text-center">
         {isSearching
           ? "Try a different name or address"
-          : "Tap the + button to save a wallet\naddress with a friendly name"}
+          : "Tap Add to save a wallet address\nwith a friendly name"}
       </Text>
-    </Animated.View>
+    </View>
   );
 }
