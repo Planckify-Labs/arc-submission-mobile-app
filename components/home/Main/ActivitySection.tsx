@@ -203,7 +203,7 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
           className="text-[10px] text-center max-w-16 mt-2 font-semibold text-light-matte-black"
           numberOfLines={1}
         >
-          {item.pointsSpent} points
+          {item.product.variant?.name ?? item.product.name}
         </Text>
       </TouchableOpacity>
     );
