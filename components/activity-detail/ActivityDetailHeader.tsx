@@ -1,7 +1,7 @@
-import { router } from "expo-router";
 import { ArrowLeft, HelpCircle, Share } from "lucide-react-native";
 import React from "react";
 import { Text, TouchableOpacity, View } from "react-native";
+import { goBackOrHome } from "@/lib/navigation/goBackOrHome";
 
 interface ActivityDetailHeaderProps {
   title?: string;
@@ -19,7 +19,7 @@ export default function ActivityDetailHeader({
   return (
     <View className="flex-row items-center justify-between p-4 pb-2">
       <TouchableOpacity
-        onPress={() => router.back()}
+        onPress={goBackOrHome}
         className="w-11 h-11 items-center justify-center rounded-2xl bg-light shadow-sm"
         activeOpacity={0.7}
         style={{

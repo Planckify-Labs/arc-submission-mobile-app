@@ -10,12 +10,13 @@
  *     If the backend endpoint isn't implemented yet (404), we log and
  *     bail — this task ships the client half; the server half is
  *     orthogonal (task 50 / backend team).
- *   - `usePushNotificationHandler()` — installs two global listeners:
- *       1. foreground receive: if `data.intentId` is present, invalidate
- *          the intent query so the polling screen refreshes instantly
- *          instead of waiting for the 3 s interval.
- *       2. tap (background / killed): if `data.intentId` is present,
- *          deep-link to the receipt screen per §8.5 #1.
+ *   - `usePushNotificationHandler()` — foreground receive: refreshes the
+ *     queries the push is about (intent status, Activity, points, inbox
+ *     badge) so the open screen updates without waiting for its poll.
+ *   - Taps are NOT handled here. They are captured at module scope
+ *     (`services/notifications/tapCapture.ts`) and routed once the app is
+ *     unlocked and ready (`hooks/useNotificationTapRouting.ts`); the
+ *     payload → screen table is `services/notifications/tapRoutes.ts`.
  *
  * Three-role separation (memory `feedback_role_separation.md`): the
  * wallet never signs for pushes. The server sends; we receive and
@@ -38,24 +39,19 @@
  * failure survives the app being killed instead of being silently lost.
  */
 
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import * as Notifications from "expo-notifications";
-import { router } from "expo-router";
 import { HTTPError } from "ky";
 import { useEffect } from "react";
 import { AppState, Platform } from "react-native";
 import { optionalAuthApi } from "@/constants/configs/ky";
+import { notificationsQueryKeys } from "@/constants/queryKeys/notificationsQueryKeys";
 import { pointsQueryKeys } from "@/constants/queryKeys/pointsQueryKeys";
 import { redeemQueryKeys } from "@/constants/queryKeys/redeemQueryKeys";
 import { transactionsQueryKeys } from "@/constants/queryKeys/transactionsQueryKeys";
 import { subscribeAuthStateChanged } from "@/hooks/queries/useAuth";
-import {
-  armPendingAgentPrompt,
-  setAgentPrefillDirect,
-} from "@/hooks/useAgentPrefill";
 import { usePaymentIntentInvalidator } from "@/hooks/usePaymentIntentInvalidator";
-import { deepLinkNotices } from "@/services/deeplinks/notices";
 import {
   type PushRegistrationState,
   readPushRegistrationState,
@@ -65,132 +61,97 @@ import {
   isAppLocked,
   subscribeAppLocked,
 } from "@/services/security/appLockState";
-import { walletConnectTransport } from "@/services/transports/walletconnect";
 
 /**
- * Android 8+ requires every notification to belong to a channel — the
- * OS silently drops notifications that reference a missing channel. We
- * register this at boot (idempotent; safe to call on every cold start)
- * so the server's FCM payload with `channelId: "payouts"` lands.
+ * Android 8+ files every notification under a channel. A push naming a
+ * channel the device never created lands in expo's generic fallback
+ * channel instead, with default importance and the wrong name in system
+ * settings. So every `channelId` the api sends (grep `channelId:` under
+ * `api/src`) is registered here, idempotently, before the push token is
+ * sent. Adding a server channel means adding a row here.
  */
-const ANDROID_PAYOUT_CHANNEL_ID = "payouts";
-const ANDROID_POINTS_CHANNEL_ID = "points";
-const ANDROID_STRATEGIES_CHANNEL_ID = "strategies";
-const ANDROID_TRANSFERS_CHANNEL_ID = "transfers";
-const ANDROID_DAPP_REQUESTS_CHANNEL_ID = "dapp-requests";
+const ANDROID_CHANNELS: ReadonlyArray<{
+  id: string;
+  name: string;
+  description: string;
+  importance: "high" | "default";
+}> = [
+  {
+    id: "transfers",
+    name: "Transfers",
+    description: "When money arrives in or leaves your wallets.",
+    importance: "high",
+  },
+  {
+    id: "payouts",
+    name: "Payments & orders",
+    description: "Merchant payments, purchases and their delivery.",
+    importance: "high",
+  },
+  {
+    id: "points",
+    name: "Points & redemptions",
+    description: "When a point deposit is confirmed or a redemption is ready.",
+    importance: "high",
+  },
+  {
+    id: "strategies",
+    name: "Strategies & yield",
+    description: "Rewards to compound, claims ready and recurring plans.",
+    importance: "high",
+  },
+  {
+    id: "approvals",
+    name: "Token approvals",
+    description: "When a wallet gives an app permission to spend a token.",
+    importance: "high",
+  },
+  {
+    id: "security",
+    name: "Security",
+    description: "Sign-ins and new devices on your wallets.",
+    importance: "high",
+  },
+  {
+    id: "dapp-requests",
+    name: "Connected app requests",
+    description:
+      "When an app connected through WalletConnect sends a request while TakumiPay is closed.",
+    importance: "high",
+  },
+  {
+    id: "portfolio",
+    name: "Portfolio summary",
+    description: "Your daily portfolio summary.",
+    importance: "default",
+  },
+  {
+    id: "announcements",
+    name: "News from TakumiPay",
+    description: "Product news and updates from the team.",
+    importance: "default",
+  },
+];
 
-/**
- * Register the Android notification channel for payout receipts. No-op
- * on iOS (iOS has no channel concept — category/thread IDs are APNs-side).
- */
-export async function registerAndroidPayoutChannel(): Promise<void> {
+/** Register every Android channel the api can send to. No-op on iOS. */
+export async function registerAndroidNotificationChannels(): Promise<void> {
   if (Platform.OS !== "android") return;
-  try {
-    await Notifications.setNotificationChannelAsync(ANDROID_PAYOUT_CHANNEL_ID, {
-      name: "Payout receipts",
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: "#c71c4b",
-      description:
-        "Notifications when a merchant receives IDR for your payment.",
-    });
-  } catch (err) {
-    console.warn("[push] failed to register Android payout channel:", err);
-  }
-}
-
-/**
- * Register the Android notification channel for point deposits and
- * redemptions. No-op on iOS.
- */
-export async function registerAndroidPointsChannel(): Promise<void> {
-  if (Platform.OS !== "android") return;
-  try {
-    await Notifications.setNotificationChannelAsync(ANDROID_POINTS_CHANNEL_ID, {
-      name: "Points & redemptions",
-      importance: Notifications.AndroidImportance.HIGH,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: "#c71c4b",
-      description:
-        "Notifications when a point deposit is confirmed or a redemption is ready.",
-    });
-  } catch (err) {
-    console.warn("[push] failed to register Android points channel:", err);
-  }
-}
-
-/**
- * Register the Android notification channel for auto-compound nudges
- * (`AutoCompoundWatcherProcessor` sends `channelId: "strategies"`). No-op
- * on iOS.
- */
-export async function registerAndroidStrategiesChannel(): Promise<void> {
-  if (Platform.OS !== "android") return;
-  try {
-    await Notifications.setNotificationChannelAsync(
-      ANDROID_STRATEGIES_CHANNEL_ID,
-      {
-        name: "Strategies & yield",
-        importance: Notifications.AndroidImportance.HIGH,
+  for (const channel of ANDROID_CHANNELS) {
+    try {
+      await Notifications.setNotificationChannelAsync(channel.id, {
+        name: channel.name,
+        description: channel.description,
+        importance:
+          channel.importance === "high"
+            ? Notifications.AndroidImportance.HIGH
+            : Notifications.AndroidImportance.DEFAULT,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: "#c71c4b",
-        description: "Reminders to compound rewards on your active positions.",
-      },
-    );
-  } catch (err) {
-    console.warn("[push] failed to register Android strategies channel:", err);
-  }
-}
-
-/**
- * Register the Android notification channel for connected-app requests
- * that arrive while the app is closed (the WalletConnect push server in
- * the API sends `channelId: "dapp-requests"`). No-op on iOS.
- */
-export async function registerAndroidDappRequestsChannel(): Promise<void> {
-  if (Platform.OS !== "android") return;
-  try {
-    await Notifications.setNotificationChannelAsync(
-      ANDROID_DAPP_REQUESTS_CHANNEL_ID,
-      {
-        name: "Connected app requests",
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#c71c4b",
-        description:
-          "When an app connected through WalletConnect sends a request while TakumiPay is closed.",
-      },
-    );
-  } catch (err) {
-    console.warn(
-      "[push] failed to register Android dapp-requests channel:",
-      err,
-    );
-  }
-}
-
-/**
- * Register the Android notification channel for incoming transfers
- * (`TransactionsService.create` sends `channelId: "transfers"` when a
- * TRANSFER-type transaction names this device's wallet as recipient).
- * No-op on iOS.
- */
-export async function registerAndroidTransfersChannel(): Promise<void> {
-  if (Platform.OS !== "android") return;
-  try {
-    await Notifications.setNotificationChannelAsync(
-      ANDROID_TRANSFERS_CHANNEL_ID,
-      {
-        name: "Transfers",
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#c71c4b",
-        description:
-          "Notifications when you receive a transfer from another wallet.",
-      },
-    );
-  } catch (err) {
-    console.warn("[push] failed to register Android transfers channel:", err);
+      });
+    } catch (err) {
+      if (__DEV__)
+        console.warn(`[push] failed to register channel ${channel.id}:`, err);
+    }
   }
 }
 
@@ -358,11 +319,7 @@ export function registerForPushNotifications(
 async function doRegisterForPushNotifications(
   wallets: string[],
 ): Promise<boolean> {
-  await registerAndroidPayoutChannel();
-  await registerAndroidPointsChannel();
-  await registerAndroidStrategiesChannel();
-  await registerAndroidTransfersChannel();
-  await registerAndroidDappRequestsChannel();
+  await registerAndroidNotificationChannels();
 
   if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
     console.log("[push] skipping registration in Expo Go");
@@ -582,410 +539,77 @@ async function postPushToken(
   return false;
 }
 
-/** Shape of the `data` payload we expect from server-sent PAID_OUT pushes. */
-interface PayoutPushData {
-  intentId?: string;
-  /**
-   * The payer's Activity row for this payment. When present, a tap lands
-   * there — a tapped push is a look-up, not the end of a pay flow, so the
-   * durable record with back → Activity is the right destination. Older
-   * api responses omit it and fall back to the receipt.
-   */
-  transactionId?: string;
-  // Display fields (safe to show in banner / log); the server never
-  // includes signature / nonce / Circle internals per §6.3.
-  merchantDisplayName?: string;
-  fiatAmountMinor?: number;
-  fiatCurrency?: string;
-}
+/**
+ * A push arrived while the app is open: refresh whatever it is about, so
+ * the screen the user is on (and the inbox badge) is current without a
+ * pull-to-refresh. Taps are routed separately, by
+ * `useNotificationTapRouting` via `services/notifications/pendingTap`.
+ */
+function invalidateForPush(
+  data: Record<string, unknown>,
+  queryClient: QueryClient,
+  invalidateIntent: (intentId: string) => void,
+): void {
+  const type = typeof data.type === "string" ? data.type : null;
+  const intentId = typeof data.intentId === "string" ? data.intentId : null;
 
-function readPayoutData(
-  notification: Notifications.Notification,
-): PayoutPushData | null {
-  const raw = notification.request.content.data;
-  if (!raw || typeof raw !== "object") return null;
-  const data = raw as Record<string, unknown>;
-  if (typeof data.intentId !== "string" || data.intentId.length === 0) {
-    return null;
+  if (intentId) invalidateIntent(intentId);
+
+  switch (type) {
+    case "point_deposit":
+      queryClient.invalidateQueries({ queryKey: pointsQueryKeys.all });
+      break;
+    case "redemption":
+      queryClient.invalidateQueries({ queryKey: pointsQueryKeys.all });
+      queryClient.invalidateQueries({ queryKey: redeemQueryKeys.all });
+      break;
+    case "purchase":
+      queryClient.invalidateQueries({ queryKey: ["purchase"] });
+      queryClient.invalidateQueries({ queryKey: transactionsQueryKeys.all });
+      break;
+    case "transfer":
+    case "wallet_activity":
+    case "onramp_settled":
+    case "merchant_payment":
+      queryClient.invalidateQueries({ queryKey: transactionsQueryKeys.all });
+      break;
+    default:
+      // Customer-payment receipts carry no `type`: the Activity row just
+      // changed status (Confirming → Paid).
+      if (intentId) {
+        queryClient.invalidateQueries({
+          queryKey: transactionsQueryKeys.all,
+        });
+      }
   }
-  return {
-    intentId: data.intentId,
-    transactionId:
-      typeof data.transactionId === "string" ? data.transactionId : undefined,
-    merchantDisplayName:
-      typeof data.merchantDisplayName === "string"
-        ? data.merchantDisplayName
-        : undefined,
-    fiatAmountMinor:
-      typeof data.fiatAmountMinor === "number"
-        ? data.fiatAmountMinor
-        : undefined,
-    fiatCurrency:
-      typeof data.fiatCurrency === "string" ? data.fiatCurrency : undefined,
-  };
-}
-
-/** Shape of the `data` payload for point-deposit / redemption pushes. */
-interface PointsPushData {
-  type: "point_deposit" | "redemption";
-  pointTransactionId?: string;
-  redemptionId?: string;
 }
 
 /**
- * `data` of a product-purchase push (payment verified / preparing /
- * delivered / delayed / refunded — see api `sendFulfilmentPush` and
- * `sendPurchaseOutcomePush`). Every one of them deep-links to the order.
- */
-function readPurchasePushData(
-  notification: Notifications.Notification,
-): { purchaseId: string } | null {
-  const raw = notification.request.content.data;
-  if (!raw || typeof raw !== "object") return null;
-  const data = raw as Record<string, unknown>;
-  if (data.type !== "purchase" || typeof data.purchaseId !== "string") {
-    return null;
-  }
-  return { purchaseId: data.purchaseId };
-}
-
-function readPointsPushData(
-  notification: Notifications.Notification,
-): PointsPushData | null {
-  const raw = notification.request.content.data;
-  if (!raw || typeof raw !== "object") return null;
-  const data = raw as Record<string, unknown>;
-  if (data.type !== "point_deposit" && data.type !== "redemption") return null;
-  return {
-    type: data.type,
-    pointTransactionId:
-      typeof data.pointTransactionId === "string"
-        ? data.pointTransactionId
-        : undefined,
-    redemptionId:
-      typeof data.redemptionId === "string" ? data.redemptionId : undefined,
-  };
-}
-
-/**
- * Shape of the `data` payload for a recurring-invest reminder
- * (DCA v1, docs/defi-quick-invest-spec.md §12.5).
- *
- * The server sends a plan-derived `prompt` — product wording only, no
- * vendor or infrastructure detail — which the device replays into the
- * agent as if the user had typed it. That lands on the normal
- * `defi_list_opportunities` → Quick Invest path. There is NO new deposit
- * UI and no new navigation primitive, and nothing is signed or submitted
- * by tapping the notification.
- */
-interface RecurringInvestPushData {
-  planId?: string;
-  prompt?: string;
-}
-
-function readRecurringInvestPushData(
-  notification: Notifications.Notification,
-): RecurringInvestPushData | null {
-  const raw = notification.request.content.data;
-  if (!raw || typeof raw !== "object") return null;
-  const data = raw as Record<string, unknown>;
-  if (data.kind !== "recurring_invest_nudge") return null;
-  return {
-    planId: typeof data.planId === "string" ? data.planId : undefined,
-    prompt: typeof data.prompt === "string" ? data.prompt : undefined,
-  };
-}
-
-/**
- * Shape of the `data` payload for connected-app request notifications:
- * `wc-request` is the wallet's own local notification (request queued
- * while backgrounded), `wc-push` comes from the API's WalletConnect push
- * server (app was closed; the relay redelivers on reconnect).
- */
-interface DappRequestPushData {
-  topic: string | null;
-  /** dApp name when known (local notifications only). */
-  app: string | null;
-}
-
-function readDappRequestPushData(
-  notification: Notifications.Notification,
-): DappRequestPushData | null {
-  const raw = notification.request.content.data;
-  if (!raw || typeof raw !== "object") return null;
-  const data = raw as Record<string, unknown>;
-  if (data.type !== "wc-request" && data.type !== "wc-push") return null;
-  return {
-    topic: typeof data.topic === "string" ? data.topic : null,
-    app: typeof data.app === "string" && data.app.length > 0 ? data.app : null,
-  };
-}
-
-/**
- * Tap on a connected-app request notification. There is no screen to
- * open: the root `ApprovalHost` shows the request itself once it is in
- * the bridge queue. What can go wrong is that there is nothing to show
- * (expired after 5 minutes, decided already, or lost with a killed
- * process), so wait briefly for the relay and then say so instead of
- * opening the app to silence.
- */
-async function resumeDappRequest(data: DappRequestPushData): Promise<void> {
-  const state = await walletConnectTransport.resumeFromNotification(data.topic);
-  if (state === "pending") return;
-  const app = data.app ?? "the app";
-  deepLinkNotices.push({
-    title: "Nothing to review",
-    body: `The request from ${app} has expired or was already handled. Go back to ${app} and try again.`,
-  });
-}
-
-/** Shape of the `data` payload for incoming-transfer pushes. */
-interface TransferPushData {
-  transactionId?: string;
-}
-
-/**
- * A merchant-payment outcome that is NOT a successful settlement
- * ("we're checking" / "didn't go through"). The api deliberately omits
- * `intentId` on these — the receipt screen is for paid intents — and
- * points at the Activity row instead.
- */
-interface MerchantPaymentPushData {
-  status?: string;
-  transactionId?: string;
-}
-
-function readMerchantPaymentPushData(
-  notification: Notifications.Notification,
-): MerchantPaymentPushData | null {
-  const raw = notification.request.content.data;
-  if (!raw || typeof raw !== "object") return null;
-  const data = raw as Record<string, unknown>;
-  if (data.type !== "merchant_payment") return null;
-  return {
-    status: typeof data.status === "string" ? data.status : undefined,
-    transactionId:
-      typeof data.transactionId === "string" ? data.transactionId : undefined,
-  };
-}
-
-function readTransferPushData(
-  notification: Notifications.Notification,
-): TransferPushData | null {
-  const raw = notification.request.content.data;
-  if (!raw || typeof raw !== "object") return null;
-  const data = raw as Record<string, unknown>;
-  if (data.type !== "transfer") return null;
-  return {
-    transactionId:
-      typeof data.transactionId === "string" ? data.transactionId : undefined,
-  };
-}
-
-/**
- * Install foreground receive + tap handlers. Must be mounted once at
- * the top of the component tree (app/_layout.tsx) — listeners are
- * global, adding them per-screen would fire the invalidator N times.
+ * Install the foreground receive handler. Must be mounted once at the top
+ * of the component tree (app/_layout.tsx): the listener is global, adding
+ * it per screen would fire the invalidation N times.
  */
 export function usePushNotificationHandler(): void {
   const invalidateIntent = usePaymentIntentInvalidator();
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    // Foreground receive — the OS banner still shows (per
-    // `initNotificationHandlers` in `services/notifications/handlers.ts`,
-    // which sets `shouldShowBanner: true`). We additionally invalidate
-    // the intent query so any open receipt screen refreshes instantly
-    // without waiting for the 3 s poll interval.
+    // The OS banner still shows (`initNotificationHandlers` sets
+    // `shouldShowBanner: true`); this only refreshes data.
     const receiveSub = Notifications.addNotificationReceivedListener(
       (notification) => {
-        const payoutData = readPayoutData(notification);
-        if (payoutData?.intentId) {
-          invalidateIntent(payoutData.intentId);
-          // The Activity row for this payment just changed status
-          // (Confirming → Paid); refresh the list and any open detail.
-          queryClient.invalidateQueries({
-            queryKey: transactionsQueryKeys.all,
-          });
-          return;
-        }
-
-        if (readMerchantPaymentPushData(notification)) {
-          queryClient.invalidateQueries({
-            queryKey: transactionsQueryKeys.all,
-          });
-          return;
-        }
-
-        const pointsData = readPointsPushData(notification);
-        if (pointsData) {
-          // Broad prefix — cheaper and safer than reconstructing every
-          // param-shaped key variant (balance/history/depositStatus) by hand.
-          queryClient.invalidateQueries({ queryKey: pointsQueryKeys.all });
-          if (pointsData.type === "redemption") {
-            queryClient.invalidateQueries({ queryKey: redeemQueryKeys.all });
-          }
-          return;
-        }
-
-        const transferData = readTransferPushData(notification);
-        if (transferData) {
-          queryClient.invalidateQueries({
-            queryKey: transactionsQueryKeys.all,
-          });
-        }
+        const raw = notification.request.content.data;
+        const data =
+          raw && typeof raw === "object"
+            ? (raw as Record<string, unknown>)
+            : {};
+        invalidateForPush(data, queryClient, invalidateIntent);
+        // Every server push is also an inbox row.
+        queryClient.invalidateQueries({
+          queryKey: notificationsQueryKeys.all,
+        });
       },
     );
-
-    // Tap (background / killed) — navigate to the receipt deep link.
-    // Expo Router typed-routes doesn't always know about
-    // `/pay-merchant/receipt` during early builds, so we cast via
-    // `as never` the same way `app/pay-merchant.tsx` does for
-    // `/pay-merchant`.
-    const responseSub = Notifications.addNotificationResponseReceivedListener(
-      (response) => {
-        const data = readPayoutData(response.notification);
-        if (!data?.intentId) {
-          const purchaseData = readPurchasePushData(response.notification);
-          if (purchaseData) {
-            try {
-              router.push({
-                pathname: "/activity-detail" as never,
-                params: { purchaseId: purchaseData.purchaseId },
-              });
-            } catch (err) {
-              console.warn("[push] activity-detail route not available:", err);
-            }
-            return;
-          }
-
-          const pointsData = readPointsPushData(response.notification);
-          if (pointsData) {
-            if (pointsData.type === "redemption" && pointsData.redemptionId) {
-              try {
-                router.push({
-                  pathname: "/activity-detail" as never,
-                  params: { redemptionId: pointsData.redemptionId },
-                });
-              } catch (err) {
-                console.warn(
-                  "[push] activity-detail route not available:",
-                  err,
-                );
-              }
-              return;
-            }
-
-            // Point deposits have no dedicated detail screen yet — land
-            // on the wallet screen, which shows the updated balance.
-            try {
-              router.push("/wallet" as never);
-            } catch (err) {
-              console.warn("[push] wallet route not available:", err);
-            }
-            return;
-          }
-
-          const recurringData = readRecurringInvestPushData(
-            response.notification,
-          );
-          if (recurringData?.prompt) {
-            // Two writes, both required. The React Query entry is what
-            // `AgentMode` drains on this launch; the MMKV copy is what
-            // survives a detour through sign-in, because a nudge fires
-            // days or weeks after setup and the session may have expired
-            // (§12.5b). The chat lives under the home pager, so routing
-            // home is part of the hand-off, not separate from it.
-            armPendingAgentPrompt(recurringData.prompt);
-            setAgentPrefillDirect(recurringData.prompt, { autoSend: true });
-            try {
-              router.push("/" as never);
-            } catch (err) {
-              console.warn("[push] home route not available:", err);
-            }
-            return;
-          }
-
-          const merchantPayment = readMerchantPaymentPushData(
-            response.notification,
-          );
-          if (merchantPayment) {
-            try {
-              router.push(
-                merchantPayment.transactionId
-                  ? {
-                      pathname: "/activity-detail" as never,
-                      params: { paymentId: merchantPayment.transactionId },
-                    }
-                  : ("/activities" as never),
-              );
-            } catch (err) {
-              console.warn("[push] activity route not available:", err);
-            }
-            return;
-          }
-
-          const transferData = readTransferPushData(response.notification);
-          if (transferData?.transactionId) {
-            try {
-              router.push({
-                pathname: "/activity-detail" as never,
-                params: { transferId: transferData.transactionId },
-              });
-            } catch (err) {
-              console.warn("[push] activity-detail route not available:", err);
-            }
-            return;
-          }
-
-          const dappRequest = readDappRequestPushData(response.notification);
-          if (dappRequest) {
-            void resumeDappRequest(dappRequest);
-          }
-          return;
-        }
-        if (data.transactionId) {
-          try {
-            router.push({
-              pathname: "/activity-detail" as never,
-              params: { paymentId: data.transactionId },
-            });
-            return;
-          } catch (err) {
-            console.warn(
-              "[push] activity-detail route not available, falling back to receipt:",
-              err,
-            );
-          }
-        }
-        try {
-          router.push({
-            pathname: "/pay-merchant/receipt" as never,
-            params: { intentId: data.intentId },
-          });
-        } catch (err) {
-          // Fall back to the base /pay-merchant screen if the receipt
-          // nested route isn't registered yet — it still renders the
-          // PaidCard from the M2 path when intent.status is terminal.
-          console.warn(
-            "[push] receipt route not available, falling back:",
-            err,
-          );
-          try {
-            router.push({
-              pathname: "/pay-merchant" as never,
-              params: { intentId: data.intentId },
-            });
-          } catch (fallbackErr) {
-            console.warn("[push] fallback deep-link also failed:", fallbackErr);
-          }
-        }
-      },
-    );
-
-    return () => {
-      receiveSub.remove();
-      responseSub.remove();
-    };
+    return () => receiveSub.remove();
   }, [invalidateIntent, queryClient]);
 }

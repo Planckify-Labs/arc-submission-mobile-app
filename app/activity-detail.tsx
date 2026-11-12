@@ -1,10 +1,11 @@
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
   RefreshControl,
   ScrollView,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -17,12 +18,74 @@ import PurchasedProductDetailCardSkeleton from "@/components/activity-detail/ske
 import PurchasedProductHeadingSkeleton from "@/components/activity-detail/skeletons/PurchasedProductHeadingSkeleton";
 import TransferDetailCardSkeleton from "@/components/activity-detail/skeletons/TransferDetailCardSkeleton";
 import TransferDetailHeadingSkeleton from "@/components/activity-detail/skeletons/TransferDetailHeadingSkeleton";
+import { useIsAuthenticated } from "@/hooks/queries/useAuth";
 import { usePurchaseById } from "@/hooks/queries/usePurchases";
 import { useRedemptionById } from "@/hooks/queries/useRedeem";
 import {
   usePaymentDetail,
   useTransaction,
 } from "@/hooks/queries/useTransactions";
+import { useGoToAuth } from "@/hooks/useGoToAuth";
+
+/**
+ * Full-screen state with a way forward. This screen is a common landing
+ * spot for notification taps, so every non-content state offers an action
+ * instead of a dead end.
+ */
+function ActivityDetailNotice({
+  subtitle,
+  title,
+  body,
+  primary,
+  secondary,
+}: {
+  subtitle: string;
+  title: string;
+  body: string;
+  primary: { label: string; onPress: () => void; busy?: boolean };
+  secondary?: { label: string; onPress: () => void };
+}) {
+  return (
+    <SafeAreaView className="flex-1 bg-light-main-container">
+      <ActivityDetailHeader title="Activity Detail" subtitle={subtitle} />
+      <View className="flex-1 justify-center items-center px-6">
+        <Text className="text-light-matte-black text-lg font-semibold mb-2 text-center">
+          {title}
+        </Text>
+        <Text className="text-light-matte-black/70 text-center mb-6">
+          {body}
+        </Text>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={primary.onPress}
+          disabled={primary.busy}
+          className="w-full bg-light-primary-red rounded-full py-4 items-center"
+        >
+          {primary.busy ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text className="text-white font-bold text-base">
+              {primary.label}
+            </Text>
+          )}
+        </TouchableOpacity>
+        {secondary ? (
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={secondary.onPress}
+            className="w-full py-4 items-center"
+          >
+            <Text className="text-light-primary-red font-semibold text-base">
+              {secondary.label}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const seeAllActivity = () => router.replace("/activities" as never);
 
 export default function ActivityDetailScreen() {
   const { purchaseId, transferId, paymentId, redemptionId } =
@@ -63,12 +126,20 @@ export default function ActivityDetailScreen() {
 
   const [isRefetchingActivityDetail, setIsRefetchingActivityDetail] =
     useState(false);
+  const { isAuthenticated, isLoading: isAuthLoading } = useIsAuthenticated();
+  const { navigatingToAuth, goToAuth } = useGoToAuth();
 
+  const hasAnyId = !!(redemptionId || purchaseId || transferId || paymentId);
+  // Detail reads need the active wallet's session. While it is still being
+  // read the queries are disabled, not loading, which used to fall through
+  // to "not found".
   const isLoading =
+    (hasAnyId && isAuthLoading) ||
     (isRedemptionLoading && !!redemptionId) ||
     (isPurchaseLoading && !!purchaseId) ||
     (isTransferLoading && !!transferId) ||
     (isPaymentLoading && !!paymentId);
+  const needsSignIn = hasAnyId && !isAuthLoading && isAuthenticated !== true;
 
   const hasError =
     redemptionError || purchaseError || transferError || paymentError;
@@ -131,47 +202,50 @@ export default function ActivityDetailScreen() {
     );
   }
 
+  if (needsSignIn) {
+    return (
+      <ActivityDetailNotice
+        subtitle="Sign in needed"
+        title="Sign in to see this activity"
+        body="Your session for this wallet has ended. Sign in again and we'll bring you back here."
+        primary={{
+          label: "Sign in",
+          onPress: () => void goToAuth(),
+          busy: navigatingToAuth,
+        }}
+        secondary={{ label: "See all activity", onPress: seeAllActivity }}
+      />
+    );
+  }
+
   if (hasError) {
     return (
-      <SafeAreaView className="flex-1 bg-light-main-container">
-        <ActivityDetailHeader
-          title="Activity Detail"
-          subtitle="Error"
-          onSharePress={handleSharePress}
-          onHelpPress={handleHelpPress}
-        />
-        <View className="flex-1 justify-center items-center px-6">
-          <Text className="text-red-500 text-lg font-semibold mb-2">
-            Failed to load activity
-          </Text>
-          <Text className="text-light-matte-black text-center">
-            We couldn't load this activity. Please check your connection and try
-            again.
-          </Text>
-        </View>
-      </SafeAreaView>
+      <ActivityDetailNotice
+        subtitle="Error"
+        title="We couldn't load this activity"
+        body="Please check your connection and try again."
+        primary={{
+          label: "Try again",
+          onPress: () => void onRefresh(),
+          busy: isRefetchingActivityDetail,
+        }}
+        secondary={{ label: "See all activity", onPress: seeAllActivity }}
+      />
     );
   }
 
   if (!redemption && !purchase && !transfer && !payment) {
     return (
-      <SafeAreaView className="flex-1 bg-light-main-container">
-        <ActivityDetailHeader
-          title="Activity Detail"
-          subtitle="Not Found"
-          onSharePress={handleSharePress}
-          onHelpPress={handleHelpPress}
-        />
-        <View className="flex-1 justify-center items-center px-6">
-          <Text className="text-light-matte-black text-lg font-semibold mb-2">
-            Activity not found
-          </Text>
-          <Text className="text-light-matte-black text-center">
-            The requested activity could not be found. Please check the ID and
-            try again.
-          </Text>
-        </View>
-      </SafeAreaView>
+      <ActivityDetailNotice
+        subtitle="Not found"
+        title="We couldn't find this activity"
+        body="It may belong to another wallet, or it is still being recorded. Your full history is in Activity."
+        primary={{ label: "See all activity", onPress: seeAllActivity }}
+        secondary={{
+          label: "Try again",
+          onPress: () => void onRefresh(),
+        }}
+      />
     );
   }
 

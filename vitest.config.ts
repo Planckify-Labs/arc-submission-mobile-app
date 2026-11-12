@@ -291,6 +291,11 @@ export default defineConfig({
       // Push-token registration retry state: persisted so a failed
       // registration survives the app being killed mid-retry.
       "services/push/pushRegistrationState.test.ts",
+      // Notification taps: payload → screen table, the once-only tap queue
+      // and the notification-centre tabs.
+      "services/notifications/tapRoutes.test.ts",
+      "services/notifications/pendingTap.test.ts",
+      "services/notifications/inboxTabs.test.ts",
     ],
   },
 });

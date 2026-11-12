@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams } from "expo-router";
 import {
   ArrowDownLeft,
   ArrowLeft,
@@ -26,6 +26,7 @@ import {
 } from "react-native-safe-area-context";
 import type { TStrategyPosition } from "@/api/types/strategy";
 import { useStrategyPositions } from "@/hooks/queries/useStrategy";
+import { goBackOrHome } from "@/lib/navigation/goBackOrHome";
 
 const CARD_SHADOW = {
   shadowColor: "#000",
@@ -100,7 +101,6 @@ function MetricRow({
 }
 
 export default function PositionDetail() {
-  const router = useRouter();
   const { bottom } = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { data: positions } = useStrategyPositions(true);
@@ -143,7 +143,7 @@ export default function PositionDetail() {
         <View className="px-4 pt-2 pb-4">
           <View className="flex-row items-center gap-3">
             <Pressable
-              onPress={() => router.back()}
+              onPress={goBackOrHome}
               hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
               className="w-9 h-9 rounded-xl bg-light items-center justify-center"
               style={CARD_SHADOW}
@@ -363,7 +363,7 @@ export default function PositionDetail() {
             <TouchableOpacity
               activeOpacity={0.85}
               disabled={!position}
-              onPress={() => router.back()}
+              onPress={goBackOrHome}
               className={`flex-1 rounded-full py-4 flex-row items-center justify-center ${position ? "bg-light" : "bg-light-matte-black/10"}`}
               style={CARD_SHADOW}
             >
@@ -375,7 +375,7 @@ export default function PositionDetail() {
             <TouchableOpacity
               activeOpacity={0.85}
               disabled={!position}
-              onPress={() => router.back()}
+              onPress={goBackOrHome}
               className={`flex-1 rounded-full py-4 flex-row items-center justify-center ${position ? "bg-light-primary-red" : "bg-light-matte-black/20"}`}
               style={
                 position

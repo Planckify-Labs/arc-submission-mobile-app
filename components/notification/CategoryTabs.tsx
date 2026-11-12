@@ -1,27 +1,14 @@
 import React, { memo } from "react";
-import { ScrollView, Text, TouchableOpacity, View } from "react-native";
-import { NotificationCategory } from "@/hooks/notification/useNotificationState";
-
-interface Category {
-  id: NotificationCategory;
-  label: string;
-}
-
-const CATEGORIES: Category[] = [
-  { id: "all", label: "All" },
-  { id: "transaction", label: "Transactions" },
-  { id: "system", label: "System" },
-  { id: "promotion", label: "Promotions" },
-];
+import { ScrollView, Text, TouchableOpacity } from "react-native";
+import { INBOX_TABS, type TInboxTab } from "@/services/notifications/inboxTabs";
 
 interface CategoryTabsProps {
-  activeCategory: NotificationCategory;
-  onCategoryChange: (category: NotificationCategory) => void;
-  getCategoryCount: (category: NotificationCategory) => number;
+  activeTab: TInboxTab;
+  onTabChange: (tab: TInboxTab) => void;
 }
 
 export const CategoryTabs = memo<CategoryTabsProps>(
-  ({ activeCategory, onCategoryChange, getCategoryCount }) => {
+  ({ activeTab, onTabChange }) => {
     return (
       <ScrollView
         horizontal
@@ -29,45 +16,28 @@ export const CategoryTabs = memo<CategoryTabsProps>(
         className="flex-row mt-4"
         contentContainerStyle={{ gap: 8 }}
       >
-        {CATEGORIES.map((category) => {
-          const isActive = activeCategory === category.id;
-          const count = getCategoryCount(category.id);
-
+        {INBOX_TABS.map((tab) => {
+          const isActive = activeTab === tab.id;
           return (
             <TouchableOpacity
-              key={category.id}
-              onPress={() => onCategoryChange(category.id)}
+              key={tab.id}
+              onPress={() => onTabChange(tab.id)}
               className={`px-4 py-2 rounded-full ${
                 isActive
                   ? "bg-light-primary-red"
                   : "bg-white border border-light-matte-black/10"
               }`}
               activeOpacity={0.7}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
             >
-              <View className="flex-row items-center">
-                <Text
-                  className={`font-medium text-sm ${
-                    isActive ? "text-white" : "text-light-matte-black/70"
-                  }`}
-                >
-                  {category.label}
-                </Text>
-                {count > 0 && (
-                  <View
-                    className={`ml-2 px-2 py-0.5 rounded-full ${
-                      isActive ? "bg-white/20" : "bg-light-matte-black/10"
-                    }`}
-                  >
-                    <Text
-                      className={`text-xs font-bold ${
-                        isActive ? "text-white" : "text-light-matte-black/70"
-                      }`}
-                    >
-                      {count}
-                    </Text>
-                  </View>
-                )}
-              </View>
+              <Text
+                className={`font-medium text-sm ${
+                  isActive ? "text-white" : "text-light-matte-black/70"
+                }`}
+              >
+                {tab.label}
+              </Text>
             </TouchableOpacity>
           );
         })}

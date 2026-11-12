@@ -35,6 +35,7 @@ import {
   useUserStrategy,
 } from "@/hooks/queries/useStrategy";
 import { useWallet } from "@/hooks/useWallet";
+import { goBackOrHome } from "@/lib/navigation/goBackOrHome";
 import { decimalsForSymbol } from "@/services/defi/assetDecimals";
 
 const tierLabel: Record<string, string> = {
@@ -465,7 +466,7 @@ export default function StrategiesIndex() {
           <View className="px-4 pt-2 pb-4">
             <View className="flex-row items-center gap-3">
               <Pressable
-                onPress={() => router.back()}
+                onPress={goBackOrHome}
                 hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
                 className="w-9 h-9 rounded-xl bg-light items-center justify-center"
                 style={CARD_SHADOW}
@@ -519,7 +520,7 @@ export default function StrategiesIndex() {
           <View className="px-4 pt-2 pb-4">
             <View className="flex-row items-center gap-3">
               <Pressable
-                onPress={() => router.back()}
+                onPress={goBackOrHome}
                 hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
                 className="w-9 h-9 rounded-xl bg-light items-center justify-center"
                 style={CARD_SHADOW}
@@ -592,7 +593,7 @@ export default function StrategiesIndex() {
         <View className="px-4 pt-2 pb-4">
           <View className="flex-row items-center gap-3">
             <Pressable
-              onPress={() => router.back()}
+              onPress={goBackOrHome}
               hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
               className="w-9 h-9 rounded-xl bg-light items-center justify-center"
               style={CARD_SHADOW}

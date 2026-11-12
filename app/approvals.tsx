@@ -8,7 +8,7 @@
 // `app/settings/approvals.tsx` was the path the task spec named, but
 // this codebase keeps routes flat under `app/`; renamed accordingly.
 
-import { router, Stack } from "expo-router";
+import { Stack } from "expo-router";
 import React, { useCallback } from "react";
 import {
   ActivityIndicator,
@@ -22,6 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { encodeFunctionData, parseAbiItem } from "viem";
 import { useTokenApprovalsQuery } from "@/hooks/queries/useTokenApprovals";
 import { useWallet } from "@/hooks/useWallet";
+import { goBackOrHome } from "@/lib/navigation/goBackOrHome";
 import { getDappBridge } from "@/services/bridge/DappBridge";
 import type { TokenApproval } from "@/services/indexer/types";
 import { getEvmChainId } from "@/services/walletKit/chainInfo";
@@ -147,7 +148,7 @@ export default function ApprovalsScreen(): React.ReactElement {
                 No outstanding approvals on this chain.
               </Text>
               <Pressable
-                onPress={() => router.back()}
+                onPress={goBackOrHome}
                 className="mt-4 px-4 py-2 rounded-full border border-gray-300"
               >
                 <Text className="text-sm text-gray-800">Go back</Text>

@@ -1,14 +1,16 @@
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import { BookUser, ShieldAlert, UserRound } from "lucide-react-native";
+import { Bell, BookUser, ShieldAlert, UserRound } from "lucide-react-native";
 import { useState } from "react";
 import { Modal, Pressable, Text, TouchableOpacity, View } from "react-native";
+import { useUnreadNotificationCount } from "@/hooks/queries/useNotifications";
 
 const SECURITY_WARNING =
   "Never share your private key or seed phrases with anyone. TakumiPay will never ask for these. Keep them stored safely offline.";
 
 export default function Header() {
   const [tooltipVisible, setTooltipVisible] = useState(false);
+  const unread = useUnreadNotificationCount();
 
   const handleWarningPress = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -37,6 +39,26 @@ export default function Header() {
           <Text numberOfLines={1} ellipsizeMode="tail" className="flex-1">
             never share your private key or seed phrases
           </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          className="rounded-full bg-light items-center justify-center aspect-square w-[45px]"
+          onPress={() => router.push("/notification")}
+          accessibilityRole="button"
+          accessibilityLabel={
+            unread > 0 ? `Notifications, ${unread} unread` : "Notifications"
+          }
+        >
+          <View className="items-center justify-center p-1 aspect-square h-full w-full">
+            <Bell color="#20222c" size={20} />
+          </View>
+          {unread > 0 ? (
+            <View className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-light-primary-red items-center justify-center border-2 border-light-main-container">
+              <Text className="text-white text-[10px] font-bold">
+                {unread > 99 ? "99+" : unread}
+              </Text>
+            </View>
+          ) : null}
         </TouchableOpacity>
         <TouchableOpacity
           activeOpacity={0.7}

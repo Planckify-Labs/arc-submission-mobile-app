@@ -36,7 +36,7 @@ export function initNotificationHandlers(): void {
           body: tx.description
             ? `${tx.description} has been confirmed`
             : `Transaction ${tx.hash.slice(0, 10)}... confirmed`,
-          data: { hash: tx.hash, chainId: tx.chainId },
+          data: { type: "local_tx", hash: tx.hash, chainId: tx.chainId },
         });
         break;
       case "failed":
@@ -45,14 +45,14 @@ export function initNotificationHandlers(): void {
           body: tx.description
             ? `${tx.description} has failed`
             : `Transaction ${tx.hash.slice(0, 10)}... failed`,
-          data: { hash: tx.hash, chainId: tx.chainId },
+          data: { type: "local_tx", hash: tx.hash, chainId: tx.chainId },
         });
         break;
       case "dropped":
         fireNotification("tx-failed", {
           title: "Transaction Dropped",
           body: "Transaction was not mined and may need to be resubmitted",
-          data: { hash: tx.hash, chainId: tx.chainId },
+          data: { type: "local_tx", hash: tx.hash, chainId: tx.chainId },
         });
         break;
     }

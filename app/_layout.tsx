@@ -46,14 +46,16 @@ import {
 } from "@/services/bridge/rootBoot";
 import { bootstrapBridgeAdapters } from "@/services/bridgeRoutes/bootstrap";
 import "@/services/deeplinks/boot";
+import { useNotificationTapRouting } from "@/hooks/useNotificationTapRouting";
 import { linkInbox } from "@/services/deeplinks/inbox";
 import { INBOX_ROUTE } from "@/services/deeplinks/intake";
 import { bootDefi } from "@/services/defi/bootstrap";
 import { bootGasAbstraction } from "@/services/gasAbstraction/boot";
 import { initNotificationHandlers } from "@/services/notifications/handlers";
+import { installNotificationTapCapture } from "@/services/notifications/tapCapture";
 import { usePointDepositOutboxFlush } from "@/services/points/usePointDepositOutboxFlush";
-import { usePurchaseOutboxFlush } from "@/services/productPay/usePurchaseOutboxFlush";
 import { bootPpobCategorizers } from "@/services/ppob";
+import { usePurchaseOutboxFlush } from "@/services/productPay/usePurchaseOutboxFlush";
 import {
   registerForPushNotifications,
   usePushNotificationHandler,
@@ -132,6 +134,11 @@ installQRMatrixCache();
 // Must run before any push can arrive, so it's called at module scope
 // rather than inside an effect.
 initNotificationHandlers();
+// Notification taps are captured here, before the first render: a tap
+// that launches the app is replayed by the native module before any
+// effect could subscribe. `useNotificationTapRouting` routes it after
+// unlock.
+installNotificationTapCapture();
 
 SplashScreen.preventAutoHideAsync();
 
@@ -239,6 +246,7 @@ function AppShell() {
   const pathname = usePathname();
 
   usePushNotificationHandler();
+  useNotificationTapRouting({ locked });
   usePushRegistrationRetry();
   useTransferRecordOutboxFlush();
   usePointDepositOutboxFlush();

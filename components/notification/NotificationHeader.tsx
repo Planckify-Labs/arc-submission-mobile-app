@@ -1,7 +1,7 @@
-import { router } from "expo-router";
 import { ArrowLeft, CheckCheck } from "lucide-react-native";
 import React, { memo } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
+import { goBackOrHome } from "@/lib/navigation/goBackOrHome";
 
 interface NotificationHeaderProps {
   unreadCount: number;
@@ -13,7 +13,9 @@ export const NotificationHeader = memo<NotificationHeaderProps>(
     return (
       <View className="flex-row items-center justify-between pb-2">
         <TouchableOpacity
-          onPress={() => router.back()}
+          onPress={goBackOrHome}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
           className="w-11 h-11 items-center justify-center rounded-2xl bg-light shadow-sm"
           activeOpacity={0.7}
           style={{
@@ -41,6 +43,8 @@ export const NotificationHeader = memo<NotificationHeaderProps>(
         {unreadCount > 0 ? (
           <TouchableOpacity
             onPress={onMarkAllAsRead}
+            accessibilityRole="button"
+            accessibilityLabel="Mark all as read"
             className="w-11 h-11 items-center justify-center rounded-2xl bg-light shadow-sm"
             activeOpacity={0.7}
             style={{
