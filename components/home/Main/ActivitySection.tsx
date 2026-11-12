@@ -110,7 +110,10 @@ function SignInCta({
 const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
   ({ embedded = false }, ref) => {
     const { activeWallet } = useWallet();
-    const paymentCopy = PRODUCT_PAYMENT_COPY[useProductPaymentMode()];
+    const productPaymentMode = useProductPaymentMode();
+    const paymentCopy = PRODUCT_PAYMENT_COPY[productPaymentMode];
+    // Redemptions belong to the point system: TOKEN mode hides them.
+    const showRedemptions = productPaymentMode === "POINTS";
     const {
       isAuthenticated,
       isLoading: isAuthLoading,
@@ -133,16 +136,20 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
         { enabled: shouldFetchTransactions },
       );
     const { data: redemptionData, refetch: refetchRedemptionHistory } =
-      useRedemptionHistory({ limit: 4 }, { enabled: shouldFetchTransactions });
+      useRedemptionHistory(
+        { limit: 4 },
+        { enabled: shouldFetchTransactions && showRedemptions },
+      );
 
-    const redemptionHistory =
-      redemptionData?.pages.flatMap((p) => p.data) ?? [];
+    const redemptionHistory = showRedemptions
+      ? (redemptionData?.pages.flatMap((p) => p.data) ?? [])
+      : [];
 
     useImperativeHandle(ref, () => ({
       refetch: () => {
         refetchTransferHistory();
         refetchPaymentHistory();
-        refetchRedemptionHistory();
+        if (showRedemptions) refetchRedemptionHistory();
       },
     }));
 
@@ -158,7 +165,7 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
       ) {
         refetchTransferHistory();
         refetchPaymentHistory();
-        refetchRedemptionHistory();
+        if (showRedemptions) refetchRedemptionHistory();
       }
 
       previousWalletAddress.current = currentWalletAddress;
@@ -169,6 +176,7 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
       refetchTransferHistory,
       refetchPaymentHistory,
       refetchRedemptionHistory,
+      showRedemptions,
     ]);
 
     const redemptionHistoryButton = (item: TRedemptionHistoryItem) => (
@@ -340,8 +348,9 @@ const ActivitySection = forwardRef<ActivitySectionRef, ActivitySectionProps>(
           Your activity, in one place
         </Text>
         <Text className="text-light-matte-black/45 text-xs text-center px-8 leading-5">
-          Payments, transfers and redemptions you make with Takumi will show up
-          here.
+          {paymentCopy.activityKinds.charAt(0).toUpperCase() +
+            paymentCopy.activityKinds.slice(1)}{" "}
+          you make with Takumi will show up here.
         </Text>
       </View>
     );

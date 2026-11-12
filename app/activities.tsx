@@ -36,7 +36,9 @@ import PurchaseCardSkeleton from "@/components/activities/PurchaseCardSkeleton";
 import TransferCard from "@/components/activities/TransferCard";
 import TransferCardSkeleton from "@/components/activities/TransferCardSkeleton";
 import LoadinngSpinnerPopup from "@/components/common/LoadinngSpinnerPopup";
+import { PRODUCT_PAYMENT_COPY } from "@/constants/configs/productPayment";
 import { useIsAuthenticated } from "@/hooks/queries/useAuth";
+import { useProductPaymentMode } from "@/hooks/queries/useProductPaymentMode";
 import { useRedemptionHistory } from "@/hooks/queries/useRedeem";
 import { useTransactionHistory } from "@/hooks/queries/useTransactions";
 import { useWallet } from "@/hooks/useWallet";
@@ -47,13 +49,15 @@ type TransferListItem = TTransaction | { id: string };
 type PaymentListItem = TTransaction | { id: string };
 type ActivityTab = "transfers" | "payments" | "redemptions";
 
-const TAB_INDEX: Record<ActivityTab, number> = {
-  transfers: 0,
-  payments: 1,
-  redemptions: 2,
-};
+// Redemptions belong to the point system, so TOKEN mode drops that tab.
+const POINTS_TABS: ActivityTab[] = ["transfers", "payments", "redemptions"];
+const TOKEN_TABS: ActivityTab[] = ["transfers", "payments"];
 
-const TAB_BY_INDEX: ActivityTab[] = ["transfers", "payments", "redemptions"];
+const TAB_LABEL: Record<ActivityTab, string> = {
+  transfers: "Transfers",
+  payments: "Payments",
+  redemptions: "Redemptions",
+};
 
 const SKELETON_DATA = Array.from({ length: 5 }).map((_, index) => ({
   id: `skeleton-${index}`,
@@ -139,7 +143,21 @@ export default function ActivitiesScreen() {
   const { isAuthenticated, isLoading: isAuthLoading } = useIsAuthenticated();
   const { activeWallet } = useWallet();
   const chainFamily = getChainFamilyLabel(activeWallet?.namespace);
-  const [activeActivity, setActiveActivity] = useState<ActivityTab>("payments");
+  const productPaymentMode = useProductPaymentMode();
+  const showRedemptions = productPaymentMode === "POINTS";
+  const activityKinds = PRODUCT_PAYMENT_COPY[productPaymentMode].activityKinds;
+  const tabs = showRedemptions ? POINTS_TABS : TOKEN_TABS;
+  const tabItems = useMemo(() => tabs.map((id) => ({ id })), [tabs]);
+  const [selectedActivity, setActiveActivity] =
+    useState<ActivityTab>("payments");
+  // A mode flip can remove the tab the user is on: fall back to payments.
+  const activeActivity = tabs.includes(selectedActivity)
+    ? selectedActivity
+    : "payments";
+  const tabIndexOf = useCallback(
+    (tab: ActivityTab) => Math.max(0, tabs.indexOf(tab)),
+    [tabs],
+  );
   const horizontalScrollRef = useRef<FlatList>(null);
 
   // Inline sign-in CTA navigation. Yield 100 ms for the spinner state
@@ -179,7 +197,9 @@ export default function ActivitiesScreen() {
     fetchNextPage: fetchMoreRedemptions,
     hasNextPage: hasMoreRedemptions,
     isFetchingNextPage: isFetchingMoreRedemptions,
-  } = useRedemptionHistory(undefined, { enabled: isAuthenticated === true });
+  } = useRedemptionHistory(undefined, {
+    enabled: isAuthenticated === true && showRedemptions,
+  });
 
   const flatRedemptions = useMemo(
     () => redemptionsData?.pages.flatMap((page) => page.data) ?? [],
@@ -187,17 +207,17 @@ export default function ActivitiesScreen() {
   );
 
   const tabIndicatorPosition = useRef(
-    new Animated.Value(TAB_INDEX[activeActivity]),
+    new Animated.Value(tabIndexOf(activeActivity)),
   ).current;
 
   const horizontalScrollX = useRef(
-    new Animated.Value(TAB_INDEX[activeActivity] * width),
+    new Animated.Value(tabIndexOf(activeActivity) * width),
   ).current;
 
-  const currentTabIndex = useRef(TAB_INDEX[activeActivity]);
+  const currentTabIndex = useRef(tabIndexOf(activeActivity));
 
   const [tabRowWidth, setTabRowWidth] = useState(0);
-  const tabSegmentWidth = tabRowWidth / TAB_BY_INDEX.length;
+  const tabSegmentWidth = tabRowWidth / tabs.length;
 
   const renderPurchaseItem = useCallback(
     ({ item }: { item: RedemptionListItem }) => {
@@ -244,19 +264,19 @@ export default function ActivitiesScreen() {
         setActiveActivity(newTab);
 
         Animated.spring(tabIndicatorPosition, {
-          toValue: TAB_INDEX[newTab],
+          toValue: tabIndexOf(newTab),
           tension: 70,
           friction: 10,
           useNativeDriver: true,
         }).start();
 
         horizontalScrollRef.current?.scrollToIndex({
-          index: TAB_INDEX[newTab],
+          index: tabIndexOf(newTab),
           animated: true,
         });
       }
     },
-    [activeActivity, tabIndicatorPosition],
+    [activeActivity, tabIndicatorPosition, tabIndexOf],
   );
 
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -445,12 +465,12 @@ export default function ActivitiesScreen() {
   ]);
 
   const renderTabContent = useCallback(
-    ({ index }: { index: number }) => {
+    ({ item }: { item: { id: ActivityTab } }) => {
       return (
         <View style={{ width }}>
-          {index === 0
+          {item.id === "transfers"
             ? TransferList
-            : index === 1
+            : item.id === "payments"
               ? PaymentList
               : PurchaseList}
         </View>
@@ -466,7 +486,7 @@ export default function ActivitiesScreen() {
 
       if (currentTabIndex.current !== newIndex) {
         currentTabIndex.current = newIndex;
-        const nextTab = TAB_BY_INDEX[newIndex];
+        const nextTab = tabs[newIndex];
         if (nextTab) {
           setActiveActivity(nextTab);
         }
@@ -479,7 +499,7 @@ export default function ActivitiesScreen() {
         }).start();
       }
     },
-    [tabIndicatorPosition],
+    [tabIndicatorPosition, tabs],
   );
 
   const handleScroll = Animated.event(
@@ -504,48 +524,23 @@ export default function ActivitiesScreen() {
           className="bg-mainborder-light-main-container/10 w-full flex-row items-center justify-evenly relative"
           onLayout={(e) => setTabRowWidth(e.nativeEvent.layout.width)}
         >
-          <TouchableOpacity
-            onPress={() => handleTabChange("transfers")}
-            activeOpacity={0.7}
-            className="px-2 py-2 items-center justify-center flex-1"
-          >
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
-              className={`${activeActivity === "transfers" ? "text-light-primary-red/75" : "text-light-matte-black/50"} text-center font-bold`}
+          {tabs.map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              onPress={() => handleTabChange(tab)}
+              activeOpacity={0.7}
+              className="px-2 py-2 items-center justify-center flex-1"
             >
-              Transfers
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => handleTabChange("payments")}
-            activeOpacity={0.7}
-            className="px-2 py-2 items-center justify-center flex-1"
-          >
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
-              className={`${activeActivity === "payments" ? "text-light-primary-red/75" : "text-light-matte-black/50"} text-center font-bold`}
-            >
-              Payments
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => handleTabChange("redemptions")}
-            activeOpacity={0.7}
-            className="px-2 py-2 items-center justify-center flex-1"
-          >
-            <Text
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
-              className={`${activeActivity === "redemptions" ? "text-light-primary-red/75" : "text-light-matte-black/50"} text-center font-bold`}
-            >
-              Redemptions
-            </Text>
-          </TouchableOpacity>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+                className={`${activeActivity === tab ? "text-light-primary-red/75" : "text-light-matte-black/50"} text-center font-bold`}
+              >
+                {TAB_LABEL[tab]}
+              </Text>
+            </TouchableOpacity>
+          ))}
 
           <Animated.View
             className="absolute bottom-0 h-1 bg-light-primary-red/75 left-0 rounded-t-md"
@@ -554,8 +549,8 @@ export default function ActivitiesScreen() {
               transform: [
                 {
                   translateX: horizontalScrollX.interpolate({
-                    inputRange: [0, width, 2 * width],
-                    outputRange: [0, tabSegmentWidth, 2 * tabSegmentWidth],
+                    inputRange: tabs.map((_, i) => i * width),
+                    outputRange: tabs.map((_, i) => i * tabSegmentWidth),
                     extrapolate: "clamp",
                   }),
                 },
@@ -609,8 +604,8 @@ export default function ActivitiesScreen() {
                 Sign in to view your activity
               </Text>
               <Text className="text-light-matte-black/45 text-center text-sm leading-6">
-                Track all your on-chain transactions, payments, and redemptions.
-                Sign in with {chainFamily} to get started.
+                Track all your on-chain {activityKinds}. Sign in with{" "}
+                {chainFamily} to get started.
               </Text>
             </View>
 
@@ -674,17 +669,14 @@ export default function ActivitiesScreen() {
             />
             <FlatList
               ref={horizontalScrollRef}
-              data={[
-                { id: "transfers" },
-                { id: "payments" },
-                { id: "redemptions" },
-              ]}
+              key={tabs.length}
+              data={tabItems}
               renderItem={renderTabContent}
               keyExtractor={(item) => item.id}
               horizontal
               pagingEnabled
               showsHorizontalScrollIndicator={false}
-              initialScrollIndex={TAB_INDEX[activeActivity]}
+              initialScrollIndex={tabIndexOf(activeActivity)}
               getItemLayout={(_, index) => ({
                 length: width,
                 offset: width * index,

@@ -77,6 +77,8 @@ export type TProductPaymentCopy = {
   emptyActivityHint: string;
   /** Catalog heading on the agent's catalog card. */
   catalogTitle: string;
+  /** What the activity history lists, mid-sentence ("payments and transfers"). */
+  activityKinds: string;
 };
 
 export const PRODUCT_PAYMENT_COPY: Record<
@@ -92,6 +94,7 @@ export const PRODUCT_PAYMENT_COPY: Record<
     emptyActivityHint:
       "Start your journey by making a purchase or sending crypto",
     catalogTitle: "Product catalog",
+    activityKinds: "payments and transfers",
   },
   POINTS: {
     serviceTitle: "Redeem",
@@ -103,5 +106,6 @@ export const PRODUCT_PAYMENT_COPY: Record<
     emptyActivityHint:
       "Start your journey by redeeming with points or sending crypto",
     catalogTitle: "Redemption catalog",
+    activityKinds: "payments, transfers and redemptions",
   },
 };
