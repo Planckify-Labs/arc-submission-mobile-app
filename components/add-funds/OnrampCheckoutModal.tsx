@@ -51,7 +51,7 @@ function OnrampCheckoutModal({
     }
     Alert.alert(
       "Leave checkout?",
-      "Your purchase isn't finished. You can start again any time.",
+      "You haven't finished topping up. You can come back any time.",
       [
         { text: "Stay", style: "cancel" },
         { text: "Leave", style: "destructive", onPress: onLeave },

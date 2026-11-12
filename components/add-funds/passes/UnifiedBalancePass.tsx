@@ -265,7 +265,7 @@ function UnifiedBalancePass({
                 className="flex-1 text-[13px] leading-[17px]"
                 style={{ color: "#e6e6ea" }}
               >
-                Buy USDC to get started
+                Top up to get started
               </Text>
               <StripButton label="Add USDC" onPress={onBuy} />
             </>

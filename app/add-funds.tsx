@@ -154,7 +154,7 @@ export default function AddFundsScreen() {
                 <AddFundsTabs tabs={tabs} selected={tab} onSelect={setPicked} />
                 {__DEV__ && !buyDestination ? (
                   <Text className="-mt-3 mb-4 text-center text-[11px] text-light-matte-black/50">
-                    Dev: Buy hidden ({buyHiddenReason(config)})
+                    Dev: Onramp hidden ({buyHiddenReason(config)})
                   </Text>
                 ) : null}
 

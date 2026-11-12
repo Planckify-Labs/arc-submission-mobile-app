@@ -11,7 +11,7 @@ import { tapFeedback } from "@/utils/hapticsUtils";
 export type TAddFundsTab = "buy" | "swap" | "bridge";
 
 const TABS: Record<TAddFundsTab, { label: string; Icon: LucideIcon }> = {
-  buy: { label: "Buy", Icon: CreditCard },
+  buy: { label: "Onramp", Icon: CreditCard },
   swap: { label: "Swap", Icon: Repeat },
   bridge: { label: "Bridge", Icon: ArrowRightLeft },
 };

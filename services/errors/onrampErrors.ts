@@ -108,8 +108,8 @@ export type OnrampCopy = { title: string; body: string };
 
 export const onrampErrorCopy: Record<OnrampErrorCode, OnrampCopy> = {
   load_failed: {
-    title: "Couldn't open the purchase screen",
-    body: "We couldn't open the purchase screen. Check your connection and try again.",
+    title: "Couldn't open checkout",
+    body: "Check your connection and try again.",
   },
   no_payment_options: {
     title: "No payment methods available",
@@ -120,8 +120,8 @@ export const onrampErrorCopy: Record<OnrampErrorCode, OnrampCopy> = {
     body: "Your identity check is still being reviewed. We'll let you know when it's done.",
   },
   rejected: {
-    title: "Purchase can't go ahead",
-    body: "We couldn't verify your details, so this purchase can't go ahead.",
+    title: "We couldn't verify you",
+    body: "Your details didn't pass the identity check this time, so we can't continue.",
   },
   // The spec's "you haven't been charged" line is withheld until the
   // provider confirms it is guaranteed (spec Q5).
@@ -130,16 +130,16 @@ export const onrampErrorCopy: Record<OnrampErrorCode, OnrampCopy> = {
     body: "Something went wrong with the payment. Please try again.",
   },
   start_failed: {
-    title: "Couldn't start the purchase",
-    body: "We couldn't start the purchase. Please try again in a moment.",
+    title: "Couldn't get started",
+    body: "Something went wrong on our side. Please try again in a moment.",
   },
   sign_in_required: {
     title: "Sign in to continue",
-    body: "Sign in with this wallet to buy funds into it.",
+    body: "Sign in with this wallet to top it up.",
   },
   unavailable: {
-    title: "Buying isn't available right now",
-    body: "Buying isn't available right now. You can still get funds by swapping or bridging.",
+    title: "Top-ups are paused for now",
+    body: "Card and bank top-ups aren't available right now. You can still swap or bridge funds in.",
   },
 };
 

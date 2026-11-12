@@ -405,11 +405,11 @@ function BuyTab({ config, candidates, preferred, onSuggestTab }: Props) {
         <View className="mb-3 flex-row items-center gap-2">
           <CreditCard size={16} color={BRAND_RED} />
           <Text className="text-xs font-bold uppercase tracking-wide text-light-primary-red">
-            Buy with card or bank
+            Card or bank
           </Text>
         </View>
         <Text className="text-xl font-bold text-light-matte-black">
-          Get {tokenNames} in your wallet
+          Top up your wallet
         </Text>
         <View className="mt-3 flex-row flex-wrap gap-1.5">
           {offered.map((t) => (
