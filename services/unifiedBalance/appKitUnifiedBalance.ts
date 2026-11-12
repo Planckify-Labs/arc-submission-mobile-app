@@ -13,22 +13,18 @@
 
 import { AppKitUnifiedBalance } from "@circle-fin/app-kit/unifiedBalance";
 import { decimalToRaw, UNIFIED_BALANCE_DECIMALS } from "./amounts";
+import {
+  toUnifiedBalanceError,
+  UnifiedBalanceError,
+  type UnifiedBalanceErrorCode,
+} from "./errors";
 import type { TUnifiedBalance, UnifiedBalanceNetwork } from "./types";
 
-export type UnifiedBalanceErrorCode =
-  | "insufficient_funds"
-  | "user_cancelled"
-  | "unavailable"
-  | "failed";
-
-export class UnifiedBalanceError extends Error {
-  readonly name = "UnifiedBalanceError";
-  readonly code: UnifiedBalanceErrorCode;
-  constructor(code: UnifiedBalanceErrorCode) {
-    super(code);
-    this.code = code;
-  }
-}
+export {
+  toUnifiedBalanceError,
+  UnifiedBalanceError,
+  type UnifiedBalanceErrorCode,
+};
 
 let kit: AppKitUnifiedBalance | null = null;
 
@@ -38,49 +34,8 @@ function getKit(): AppKitUnifiedBalance {
   return kit;
 }
 
-function classify(error: unknown): UnifiedBalanceErrorCode {
-  const name = (error as { name?: unknown } | null)?.name;
-  const code = (error as { code?: unknown } | null)?.code;
-  const parts = [
-    name,
-    (error as { message?: unknown } | null)?.message,
-    (error as { shortMessage?: unknown } | null)?.shortMessage,
-    (error as { details?: unknown } | null)?.details,
-  ]
-    .filter((p): p is string => typeof p === "string")
-    .join(" ")
-    .toLowerCase();
-  if (
-    (typeof name === "string" && name.startsWith("BALANCE_")) ||
-    parts.includes("insufficient") ||
-    parts.includes("exceeds balance")
-  ) {
-    return "insufficient_funds";
-  }
-  if (
-    code === 4001 ||
-    parts.includes("user rejected") ||
-    parts.includes("user denied") ||
-    parts.includes("cancel")
-  ) {
-    return "user_cancelled";
-  }
-  if (
-    parts.includes("network") ||
-    parts.includes("fetch") ||
-    parts.includes("timeout") ||
-    parts.includes("timed out")
-  ) {
-    return "unavailable";
-  }
-  return "failed";
-}
-
 function fail(where: string, error: unknown): never {
-  if (typeof __DEV__ !== "undefined" && __DEV__) {
-    console.warn(`[unifiedBalance] ${where} failed:`, error);
-  }
-  throw new UnifiedBalanceError(classify(error));
+  throw toUnifiedBalanceError(where, error);
 }
 
 const ZERO = "0";

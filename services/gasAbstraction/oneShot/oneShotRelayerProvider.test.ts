@@ -14,11 +14,15 @@ import { baseSepolia } from "viem/chains";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import type { TWallet } from "@/constants/types/walletTypes";
 import { RelayerRpcError } from "@/services/walletKit/evm/relayer";
+import type { ContractCallsIntent } from "../types";
 import {
+  CALLS_GAS_UPPER_BOUND,
   computeRoughFee,
+  quoteRelayerCalls,
   quoteRelayerTransfer,
   type RelayerKit,
   resolveRelayerContext,
+  runRelayerCalls,
   runRelayerTransfer,
 } from "./oneShotRelayerProvider";
 
@@ -68,9 +72,13 @@ interface FakeOpts {
 
 interface Recorder {
   createScopes: {
+    type?: string;
     maxAmount?: bigint;
     tokenAddress?: string;
     delegate?: string;
+    targets?: string[];
+    methods?: string[];
+    exactCalldata?: string;
   }[];
   estimateCalls: { authorizationList?: unknown[]; feeSafetyMax?: bigint }[];
   sendCalls: {
@@ -140,9 +148,13 @@ function makeKit(opts: FakeOpts = {}): { kit: RelayerKit; rec: Recorder } {
     },
     async createDelegation({ delegate, scope }) {
       rec.createScopes.push({
+        type: scope.type,
         maxAmount: scope.maxAmount,
         tokenAddress: scope.tokenAddress,
         delegate,
+        targets: scope.targets,
+        methods: scope.methods,
+        exactCalldata: scope.exactCalldata,
       });
       return {
         delegate: delegate as `0x${string}`,
@@ -533,5 +545,245 @@ describe("runRelayerTransfer", () => {
       }),
     );
     assert.equal(rec.sendAttempts, 1);
+  });
+});
+
+// ── Contract calls (e.g. a Unified Balance deposit) ─────────────────────
+
+const GATEWAY = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
+const WALLET_USDC = 2_000_000n; // 2 USDC in the wallet
+
+/**
+ * A "deposit everything but the fee" intent, like the Unified Balance
+ * one: the call's amount is encoded in its calldata, so a rebuilt call at
+ * a new fee has different calldata.
+ */
+function depositAllIntent(builtAt: bigint[]): ContractCallsIntent {
+  const valueFor = (fee: bigint) => WALLET_USDC - fee;
+  return {
+    async buildCalls({ amount }) {
+      builtAt.push(amount);
+      return [
+        {
+          target: GATEWAY,
+          data: `0xabcdef01${valueFor(amount).toString(16).padStart(64, "0")}`,
+        },
+      ];
+    },
+    walletSpend: ({ amount }) => ({
+      tokenAddress: USDC,
+      amount: valueFor(amount),
+    }),
+    memo: "unified-balance-deposit",
+  };
+}
+
+describe("quoteRelayerCalls", () => {
+  it("counts what the calls spend in the fee token toward the gate", async () => {
+    const { kit } = makeKit({ minFee: 10_000n });
+    const quote = await quoteRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: depositAllIntent([]),
+      feeTokenSymbol: "USDC",
+    });
+    // Everything but the fee, plus the fee: exactly the wallet balance.
+    assert.equal(quote.totalRequired, WALLET_USDC);
+    assert.equal(quote.feeToken.address, USDC);
+  });
+
+  it("gates only the fee when the calls spend a different token", async () => {
+    const { kit } = makeKit({
+      minFee: 10_000n,
+      extraTokens: [{ address: USDT0, symbol: "USDT0", decimals: 6 }],
+    });
+    const quote = await quoteRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: depositAllIntent([]),
+      feeTokenSymbol: "USDT0",
+    });
+    assert.equal(quote.totalRequired, quote.feeAmount);
+  });
+
+  it("uses the calls gas bound for the rough fee", async () => {
+    const { kit } = makeKit({ minFee: 0n });
+    const quote = await quoteRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: depositAllIntent([]),
+      feeTokenSymbol: "USDC",
+    });
+    const feeData = await kit.getRelayerFeeData!({ chain, token: USDC });
+    assert.equal(
+      quote.feeAmount,
+      computeRoughFee(feeData, CALLS_GAS_UPPER_BOUND),
+    );
+  });
+});
+
+describe("runRelayerCalls", () => {
+  it("bundles a fee leg plus one call pinned to its exact calldata", async () => {
+    const { kit, rec } = makeKit({ minFee: 10_000n });
+    const res = await runRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: depositAllIntent([]),
+      feeTokenSymbol: "USDC",
+    });
+    assert.equal(res.taskId, "0xtaskid");
+    assert.equal(res.feeAmount, 10_000n);
+
+    const [fee, call] = rec.createScopes;
+    assert.equal(fee.type, "erc20TransferAmount");
+    assert.equal(fee.tokenAddress, USDC);
+    assert.equal(fee.maxAmount, 10_000n);
+    assert.equal(call.type, "functionCall");
+    assert.deepEqual(call.targets, [GATEWAY]);
+    assert.deepEqual(call.methods, ["0xabcdef01"]);
+    for (const s of rec.createScopes) assert.equal(s.delegate, TARGET);
+
+    const sent = rec.sendCalls[0].transactions as {
+      executions: { target: string; value: bigint; data: string }[];
+    }[];
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0].executions[0].target, USDC);
+    assert.equal(sent[1].executions[0].target, GATEWAY);
+    assert.equal(sent[1].executions[0].value, 0n);
+    // The delegation allows exactly the calldata that is executed.
+    assert.equal(call.exactCalldata, sent[1].executions[0].data);
+  });
+
+  it("rebuilds the call at the fee the relayer requires", async () => {
+    const builtAt: bigint[] = [];
+    const { kit, rec } = makeKit({
+      minFee: 10_000n,
+      requiredFees: [25_000n, 25_000n],
+    });
+    const res = await runRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: depositAllIntent(builtAt),
+      feeTokenSymbol: "USDC",
+    });
+    assert.deepEqual(builtAt, [10_000n, 25_000n]);
+    assert.equal(res.feeAmount, 25_000n);
+    // The submitted bundle is the rebuilt one: fee leg capped at the new
+    // fee, deposit sized to everything but it.
+    const sent = rec.sendCalls[0].transactions as {
+      executions: { data: string }[];
+    }[];
+    const expected = (WALLET_USDC - 25_000n).toString(16).padStart(64, "0");
+    assert.ok(sent[1].executions[0].data.endsWith(expected));
+    const lastFee = rec.createScopes[rec.createScopes.length - 2];
+    assert.equal(lastFee.maxAmount, 25_000n);
+  });
+
+  it("carries the 7702 upgrade on the first relayed request", async () => {
+    const { kit, rec } = makeKit({ active: false });
+    await runRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: depositAllIntent([]),
+      feeTokenSymbol: "USDC",
+    });
+    assert.equal(rec.authSigned, 1);
+    assert.equal(rec.sendCalls[0].authorizationList?.length, 1);
+  });
+
+  it("refuses a call without a selector before submitting", async () => {
+    const { kit, rec } = makeKit();
+    await assert.rejects(
+      () =>
+        runRelayerCalls(kit, {
+          wallet,
+          chain,
+          intent: {
+            buildCalls: async () => [{ target: GATEWAY, data: "0x" }],
+          },
+          feeTokenSymbol: "USDC",
+        }),
+      (err: Error) => err.name === "GasAbstractionUnavailableError",
+    );
+    assert.equal(rec.sendAttempts, 0);
+  });
+
+  it("declines (typed) when the estimate fails, sending nothing", async () => {
+    const { kit, rec } = makeKit({ estimateSuccess: false });
+    await assert.rejects(
+      () =>
+        runRelayerCalls(kit, {
+          wallet,
+          chain,
+          intent: depositAllIntent([]),
+          feeTokenSymbol: "USDC",
+        }),
+      (err: Error) => err.name === "GasAbstractionUnavailableError",
+    );
+    assert.equal(rec.sendAttempts, 0);
+  });
+});
+
+describe("contract calls with the fee after them (a mint)", () => {
+  const MINTER = "0x2222222d7164433c4C09B0b0D809a9b52C04C205";
+  const mintIntent = (credit?: bigint): ContractCallsIntent => ({
+    feeAfterCalls: true,
+    ...(credit !== undefined
+      ? { walletCredit: { tokenAddress: USDC, amount: credit } }
+      : {}),
+    buildCalls: async () => [{ target: MINTER, data: "0xabcdef01" }],
+  });
+
+  it("puts the fee leg last so the call can fund it", async () => {
+    const { kit, rec } = makeKit({ minFee: 10_000n });
+    await runRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: mintIntent(5_000_000n),
+      feeTokenSymbol: "USDC",
+    });
+    const sent = rec.sendCalls[0].transactions as {
+      executions: { target: string }[];
+    }[];
+    assert.deepEqual(
+      sent.map((e) => e.executions[0].target),
+      [MINTER, USDC],
+    );
+  });
+
+  it("counts the mint toward the gate: an empty wallet can pay from it", async () => {
+    const { kit } = makeKit({ minFee: 10_000n });
+    const quote = await quoteRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: mintIntent(5_000_000n),
+      feeTokenSymbol: "USDC",
+    });
+    assert.equal(quote.totalRequired, 0n);
+  });
+
+  it("still needs the fee when the mint is smaller than it", async () => {
+    const { kit } = makeKit({ minFee: 10_000n });
+    const quote = await quoteRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: mintIntent(4_000n),
+      feeTokenSymbol: "USDC",
+    });
+    assert.equal(quote.totalRequired, quote.feeAmount - 4_000n);
+  });
+
+  it("ignores a credit in another token than the fee", async () => {
+    const { kit } = makeKit({
+      minFee: 10_000n,
+      extraTokens: [{ address: USDT0, symbol: "USDT0", decimals: 6 }],
+    });
+    const quote = await quoteRelayerCalls(kit, {
+      wallet,
+      chain,
+      intent: mintIntent(5_000_000n),
+      feeTokenSymbol: "USDT0",
+    });
+    assert.equal(quote.totalRequired, quote.feeAmount);
   });
 });

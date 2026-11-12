@@ -12,12 +12,13 @@ import {
   resolveChainIdentifier,
   ViemAdapter,
 } from "@circle-fin/adapter-viem-v2";
-import type { Chain } from "viem";
+import { type Chain, erc20Abi } from "viem";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import type { TWallet } from "@/constants/types/walletTypes";
 import { getAccountForWallet } from "@/services/walletService";
 import { getPublicClient, getWalletClient } from "@/utils/clients";
 import type {
+  AdapterRelay,
   ChainConfigLookup,
   UnifiedBalanceChainEntry,
   UnifiedBalanceChainFacts,
@@ -25,6 +26,7 @@ import type {
   UnifiedBalanceSource,
   UnifiedBalanceTokenRef,
 } from "../types";
+import { buildRelayedDepositIntent, type UsdcDomain } from "./relayedDeposit";
 
 interface GatewayChainDefinition {
   chain: string;
@@ -32,6 +34,8 @@ interface GatewayChainDefinition {
   chainId: number;
   isTestnet: boolean;
   usdcAddress: string;
+  /** Circle's GatewayWallet on this chain. */
+  gatewayWallet: string;
   nativeIsUsdc: boolean;
   nativeDecimals: number;
   /** The raw App Kit definition, handed back to App Kit untouched. */
@@ -75,6 +79,7 @@ function listGatewayEvmChains(): GatewayChainDefinition[] {
       chainId: def.chainId,
       isTestnet: def.isTestnet === true,
       usdcAddress: def.usdcAddress,
+      gatewayWallet: def.gateway?.contracts?.v1?.wallet ?? "",
       nativeIsUsdc: def.nativeCurrency?.symbol?.toUpperCase() === "USDC",
       nativeDecimals: def.nativeCurrency?.decimals ?? 18,
       definition: def,
@@ -110,10 +115,17 @@ function networkOf(isTestnet: boolean): UnifiedBalanceNetwork {
  * `window`, assumes an injected wallet and sends `wallet_switchEthereumChain`
  * to our node RPC, which rejects it. Each client here is already bound to
  * the right chain, so there is nothing to switch.
+ *
+ * With `relay`, every zero-value contract call App Kit sends (the spend's
+ * `gatewayMint`, the faster route's approve and burn) goes through the gas
+ * relayer instead; App Kit then waits for the returned hash as usual. A
+ * call the relayer doesn't take (`send` resolves null) is sent here in the
+ * chain's gas coin, unchanged.
  */
-function walletClientOn(
+export function walletClientOn(
   account: NonNullable<ReturnType<typeof getAccountForWallet>>,
   chain: Chain,
+  relay?: AdapterRelay,
 ) {
   const client = getWalletClient(account, chain);
   const originalRequest = client.request.bind(client);
@@ -126,6 +138,25 @@ function walletClientOn(
       throw new Error(`Cannot switch to chain ${id}, expected ${chain.id}`);
     }
   }) as typeof client.switchChain;
+  if (relay) {
+    const originalSend = client.sendTransaction.bind(client);
+    client.sendTransaction = (async (params: {
+      to?: string | null;
+      data?: string;
+      value?: bigint;
+    }) => {
+      const value = params.value ?? 0n;
+      if (params.to && params.data && params.data !== "0x" && value === 0n) {
+        const hash = await relay.send({
+          chainId: chain.id,
+          to: params.to,
+          data: params.data,
+        });
+        if (hash) return hash as `0x${string}`;
+      }
+      return originalSend(params as never);
+    }) as typeof client.sendTransaction;
+  }
   return client;
 }
 
@@ -133,6 +164,43 @@ function walletClientOn(
 function preferAppChain(chain: Chain, lookupChain: ChainConfigLookup): Chain {
   const config = lookupChain(chain.id);
   return config?.namespace === "eip155" ? config.chain : chain;
+}
+
+const FIAT_TOKEN_VERSION_ABI = [
+  {
+    type: "function",
+    name: "version",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+] as const;
+
+const usdcDomains = new Map<string, UsdcDomain>();
+
+/**
+ * USDC's EIP-712 domain name and version, read from the contract (Base
+ * says "USD Coin", Base Sepolia "USDC"), cached per chain + contract.
+ */
+async function readUsdcDomain(
+  chain: Extract<ChainConfig, { namespace: "eip155" }>,
+  usdc: `0x${string}`,
+): Promise<UsdcDomain> {
+  const key = `${chain.chain.id}:${usdc.toLowerCase()}`;
+  const cached = usdcDomains.get(key);
+  if (cached) return cached;
+  const client = getPublicClient(chain.chain);
+  const [name, version] = await Promise.all([
+    client.readContract({ address: usdc, abi: erc20Abi, functionName: "name" }),
+    client.readContract({
+      address: usdc,
+      abi: FIAT_TOKEN_VERSION_ABI,
+      functionName: "version",
+    }),
+  ]);
+  const domain = { name, version };
+  usdcDomains.set(key, domain);
+  return domain;
 }
 
 export const evmUnifiedBalanceSource: UnifiedBalanceSource = {
@@ -162,7 +230,7 @@ export const evmUnifiedBalanceSource: UnifiedBalanceSource = {
     return wallet.namespace === "eip155" ? wallet.address : null;
   },
 
-  adapterFor({ wallet, network, lookupChain }) {
+  adapterFor({ wallet, network, lookupChain, relay }) {
     if (wallet.namespace !== "eip155") return null;
     const account = getAccountForWallet(wallet);
     if (!account) return null;
@@ -176,7 +244,11 @@ export const evmUnifiedBalanceSource: UnifiedBalanceSource = {
         getPublicClient: ({ chain }: { chain: Chain }) =>
           getPublicClient(preferAppChain(chain, lookupChain)) as never,
         getWalletClient: ({ chain }: { chain: Chain }) =>
-          walletClientOn(account, preferAppChain(chain, lookupChain)) as never,
+          walletClientOn(
+            account,
+            preferAppChain(chain, lookupChain),
+            relay,
+          ) as never,
       },
       // `user-controlled`: the address is the wallet's own, never passed in.
       { addressContext: "user-controlled", supportedChains } as never,
@@ -209,5 +281,28 @@ export const evmUnifiedBalanceSource: UnifiedBalanceSource = {
     } catch {
       return null;
     }
+  },
+
+  relayedDeposit({ wallet, chain, budgetRaw }) {
+    if (chain.namespace !== "eip155" || wallet.namespace !== "eip155") {
+      return null;
+    }
+    const def = listGatewayEvmChains().find(
+      (c) => c.chainId === chain.chain.id,
+    );
+    // A chain whose gas IS USDC already pays from the USDC itself.
+    if (!def || def.nativeIsUsdc) return null;
+    const account = getAccountForWallet(wallet);
+    if (!account) return null;
+    const usdc = def.usdcAddress as `0x${string}`;
+    return buildRelayedDepositIntent({
+      chainId: def.chainId,
+      usdcAddress: usdc,
+      gatewayWallet: def.gatewayWallet,
+      depositor: account.address,
+      budgetRaw,
+      readUsdcDomain: () => readUsdcDomain(chain, usdc),
+      signTypedData: (typed) => account.signTypedData(typed),
+    });
   },
 };

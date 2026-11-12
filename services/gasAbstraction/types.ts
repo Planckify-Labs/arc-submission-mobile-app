@@ -84,6 +84,59 @@ export interface FeeToken {
   decimals: number;
 }
 
+/** One prepared contract call, run as the wallet with no native value. */
+export interface ContractCall {
+  target: string;
+  /** Full calldata, selector included. */
+  data: string;
+}
+
+/**
+ * Contract calls the user wants made (not a plain token transfer), with
+ * gas paid in a stablecoin. Each call is authorised on its own and pinned
+ * to its exact calldata, so the relayer can run these calls and nothing
+ * else.
+ *
+ * The calls are built once the fee is known, and rebuilt if the locked
+ * fee changes: a call that spends the fee token (a deposit of "everything
+ * but the fee") needs the final fee to size itself.
+ */
+export interface ContractCallsIntent {
+  buildCalls(fee: { amount: bigint; token: FeeToken }): Promise<ContractCall[]>;
+  /**
+   * What the calls themselves take from the wallet for a given fee, so the
+   * balance gate can count it when it's the fee token. Omit when the calls
+   * spend nothing.
+   */
+  walletSpend?(fee: { amount: bigint; token: FeeToken }): {
+    tokenAddress: string;
+    amount: bigint;
+  };
+  /**
+   * Run the calls before the fee leg. For calls that bring the fee token
+   * into the wallet (a mint) when it may hold none before them: the fee is
+   * then paid out of what they deliver.
+   */
+  feeAfterCalls?: boolean;
+  /**
+   * What the calls bring into the wallet ahead of the fee (only counted
+   * with `feeAfterCalls`), so the balance gate can count it.
+   */
+  walletCredit?: { tokenAddress: string; amount: bigint };
+  /** Upper-bound gas for the rough quote; the relayer's estimate locks it. */
+  gasUpperBound?: bigint;
+  /** Optional opaque correlation label echoed back in status. */
+  memo?: string;
+}
+
+export interface GasAbstractionCallsArgs {
+  wallet: TWallet;
+  chain: ChainConfig;
+  intent: ContractCallsIntent;
+  /** As in {@link GasAbstractionArgs.feeTokenSymbol}. */
+  feeTokenSymbol: string;
+}
+
 /**
  * Rough, no-signing fee quote for pre-send UI + the balance gate. The
  * authoritative fee is locked during `execute` (relayer estimate).
@@ -154,8 +207,36 @@ export interface GasAbstractionProvider {
    */
   execute(args: GasAbstractionArgs): Promise<GasAbstractionExecuteResult>;
 
+  /**
+   * Optional: rough quote for contract calls (see
+   * {@link ContractCallsIntent}). A provider that only relays transfers
+   * leaves both `*Calls` methods out; callers presence-check.
+   */
+  getCallsQuote?(args: GasAbstractionCallsArgs): Promise<GasAbstractionQuote>;
+
+  /**
+   * Optional: the price-lock loop for contract calls. Same contract as
+   * `execute`: the caller gates (PIN / biometric) before invoking it.
+   */
+  executeCalls?(
+    args: GasAbstractionCallsArgs,
+  ): Promise<GasAbstractionExecuteResult>;
+
   /** Polls the status of a submitted task. */
   getStatus(args: GetGasAbstractionStatusArgs): Promise<GasAbstractionStatus>;
+}
+
+/** A provider that can also relay contract calls. */
+export type CallsGasAbstractionProvider = GasAbstractionProvider &
+  Required<Pick<GasAbstractionProvider, "getCallsQuote" | "executeCalls">>;
+
+export function relaysContractCalls(
+  provider: GasAbstractionProvider,
+): provider is CallsGasAbstractionProvider {
+  return (
+    typeof provider.getCallsQuote === "function" &&
+    typeof provider.executeCalls === "function"
+  );
 }
 
 /** Thrown when an intent can't be abstracted (declined before signing). */

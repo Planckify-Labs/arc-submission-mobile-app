@@ -1,5 +1,7 @@
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import type { TWallet } from "@/constants/types/walletTypes";
+import type { ContractCallsIntent } from "@/services/gasAbstraction/types";
+import type { UnifiedBalanceError } from "./errors";
 
 export type UnifiedBalanceNetwork = "mainnet" | "testnet";
 
@@ -67,6 +69,11 @@ export interface UnifiedBalanceSource {
     lookupChain: ChainConfigLookup;
     /** The chain the action runs on (a family may need its RPC). */
     chain: ChainConfig;
+    /**
+     * Send the adapter's own transactions through the gas relayer where it
+     * applies (see `relay.ts`). A family without a relayer ignores it.
+     */
+    relay?: AdapterRelay;
   }): unknown | null | Promise<unknown | null>;
   /**
    * Every chain Gateway serves on `network` for this family: what Bring in
@@ -78,6 +85,42 @@ export interface UnifiedBalanceSource {
    * the chain's gas coin, or null when it can't be priced right now.
    */
   estimateDepositFeeWei(chain: ChainConfig): Promise<bigint | null>;
+  /**
+   * Optional: a deposit the gas relayer can submit for `wallet` on
+   * `chain`, so the fee is paid in the gas-settings stablecoin instead of
+   * the chain's gas coin. `budgetRaw` is the 6-decimal USDC that leaves
+   * the wallet; a fee paid in USDC comes out of it. Null when this chain
+   * or wallet can't build one. A family without it always pays its own
+   * gas through `adapterFor`.
+   */
+  relayedDeposit?(args: {
+    wallet: TWallet;
+    chain: ChainConfig;
+    budgetRaw: bigint;
+  }): ContractCallsIntent | null;
+}
+
+/**
+ * Routes one wallet transaction App Kit wants to send through the gas
+ * relayer, so its fee is paid in the Gas Settings stablecoin.
+ */
+export interface AdapterRelay {
+  /**
+   * Send a zero-value call as the wallet on `chainId`. Resolves with the
+   * on-chain transaction hash, or null when the relayer doesn't apply
+   * there (the adapter then sends it in the gas coin). Throws when the
+   * stablecoin applies but can't pay, like Send: never a silent switch.
+   */
+  send(call: {
+    chainId: number;
+    to: string;
+    data: string;
+  }): Promise<string | null>;
+  /**
+   * The curated error behind the last failed `send`, once. App Kit wraps
+   * whatever `send` throws in its own error, which would lose the code.
+   */
+  takeError(): UnifiedBalanceError | null;
 }
 
 export interface UnifiedBalanceChainEntry {

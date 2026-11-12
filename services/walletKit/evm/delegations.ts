@@ -79,6 +79,11 @@ export function mapScopeToSdk(scope: DelegationScope): SdkScopeConfig {
         type: ScopeType.FunctionCall,
         targets: (scope.targets ?? []) as `0x${string}`[],
         selectors: scope.methods ?? [],
+        ...(scope.exactCalldata
+          ? {
+              exactCalldata: { calldata: scope.exactCalldata as `0x${string}` },
+            }
+          : {}),
       };
     case "erc20PeriodTransfer":
       return {

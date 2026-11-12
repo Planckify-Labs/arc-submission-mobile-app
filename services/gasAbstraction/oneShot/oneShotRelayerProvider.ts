@@ -37,6 +37,7 @@ import {
 } from "@/services/walletKit/evm/relayer";
 import { walletKitRegistry } from "@/services/walletKit/registry";
 import type {
+  DelegationScope,
   DelegationStruct,
   RelayerBundleEntry,
   RelayerChainCapabilities,
@@ -49,6 +50,7 @@ import {
   type FeeToken,
   feeTokenSymbolMatches,
   type GasAbstractionArgs,
+  type GasAbstractionCallsArgs,
   type GasAbstractionExecuteResult,
   type GasAbstractionProvider,
   type GasAbstractionQuote,
@@ -184,25 +186,24 @@ export async function fetchRelayerChainCapabilities(
 }
 
 /**
- * Resolves the relayer capabilities for the chain and the fee token the
- * user asked for (`feeTokenSymbol`, the gas-settings preference). The
- * token being SENT is independent — it may be the fee token itself, IDRX,
- * or anything else. Declines (typed unavailable error) only when the
- * chain isn't covered or the symbol isn't an accepted fee token there, so
- * `resolveGasPayment` can fall back to native gas.
+ * The relayer's capabilities on `chain` and the accepted fee token whose
+ * symbol matches `feeTokenSymbol` (the gas-settings preference). Declines
+ * with a typed unavailable error when the chain isn't covered or the
+ * symbol isn't accepted there, so the policy can fall back to native gas.
  */
-export async function resolveRelayerContext(
+export async function resolveFeeToken(
   kit: RelayerKit,
-  { chain, intent, feeTokenSymbol }: GasAbstractionArgs,
-): Promise<ResolvedRelayerContext> {
+  chain: ChainConfig,
+  feeTokenSymbol: string,
+): Promise<{ chainCaps: RelayerChainCapabilities; feeToken: FeeToken }> {
   const chainCaps = await fetchRelayerChainCapabilities(kit, chain);
   if (!chainCaps) {
     throw new GasAbstractionUnavailableError(
       "chain not in relayer capabilities",
     );
   }
-  // Gas is paid in the preferred stablecoin regardless of what's being
-  // sent — gas settings is the source of truth for the fee token. Match by
+  // Gas is paid in the preferred stablecoin regardless of what the work
+  // is: gas settings is the source of truth for the fee token. Match by
   // symbol (the relayer keys accepted tokens by address but tags each with
   // its symbol); the accepted set is per chain and comes from the live
   // capabilities, so the same code serves every chain the relayer does.
@@ -214,6 +215,26 @@ export async function resolveRelayerContext(
       "preferred token not accepted as relayer fee token",
     );
   }
+  return { chainCaps, feeToken };
+}
+
+/**
+ * Resolves the relayer capabilities for the chain and the fee token the
+ * user asked for (`feeTokenSymbol`, the gas-settings preference). The
+ * token being SENT is independent — it may be the fee token itself, IDRX,
+ * or anything else. Declines (typed unavailable error) only when the
+ * chain isn't covered or the symbol isn't an accepted fee token there, so
+ * `resolveGasPayment` can fall back to native gas.
+ */
+export async function resolveRelayerContext(
+  kit: RelayerKit,
+  { chain, intent, feeTokenSymbol }: GasAbstractionArgs,
+): Promise<ResolvedRelayerContext> {
+  const { chainCaps, feeToken } = await resolveFeeToken(
+    kit,
+    chain,
+    feeTokenSymbol,
+  );
   return {
     chainCaps,
     feeToken,
@@ -249,20 +270,19 @@ export async function quoteRelayerTransfer(
   };
 }
 
-/**
- * Full price-lock loop: optional in-flight EIP-7702 upgrade, build + sign
- * the delegation, estimate, re-sign if the required fee changed, submit.
- */
-export async function runRelayerTransfer(
-  kit: RelayerKit,
-  args: GasAbstractionArgs,
-): Promise<GasAbstractionExecuteResult> {
-  const { wallet, chain, intent } = args;
-  const { chainCaps, feeToken, sameToken } = await resolveRelayerContext(
-    kit,
-    args,
-  );
+type FullRelayerKit = Required<
+  Pick<
+    RelayerKit,
+    | "createDelegation"
+    | "signDelegation"
+    | "estimate7710Transaction"
+    | "send7710Transaction"
+    | "getRelayerFeeData"
+  >
+> &
+  RelayerKit;
 
+function assertFullRelayerKit(kit: RelayerKit): asserts kit is FullRelayerKit {
   if (
     !kit.createDelegation ||
     !kit.signDelegation ||
@@ -272,6 +292,55 @@ export async function runRelayerTransfer(
   ) {
     throw new GasAbstractionUnavailableError("relayer methods unsupported");
   }
+}
+
+/** Signs one delegation from the wallet to the relayer's target. */
+async function signRelayerDelegation(
+  kit: FullRelayerKit,
+  args: {
+    wallet: GasAbstractionArgs["wallet"];
+    chain: ChainConfig;
+    chainCaps: RelayerChainCapabilities;
+    scope: DelegationScope;
+  },
+): Promise<DelegationStruct> {
+  const { wallet, chain, chainCaps, scope } = args;
+  const unsigned = await kit.createDelegation({
+    wallet,
+    chain,
+    delegate: chainCaps.targetAddress,
+    scope,
+    salt: randomSaltHex(),
+  });
+  // SI-4: the delegate (redeemer) must be the relayer's target address.
+  if (!eqAddr(unsigned.delegate, chainCaps.targetAddress)) {
+    throw new GasAbstractionUnavailableError("redeemer address mismatch");
+  }
+  const signature = await kit.signDelegation({
+    wallet,
+    chain,
+    delegation: unsigned,
+  });
+  return { ...unsigned, signature };
+}
+
+/**
+ * The price-lock loop every relayed request shares: optional in-flight
+ * EIP-7702 upgrade, build + sign the bundle at the relayer's floor fee,
+ * estimate, rebuild once at the fee the relayer requires, then submit
+ * with the locked `context` (one refresh on an expired quote).
+ */
+async function submitPriceLocked(
+  kit: FullRelayerKit,
+  args: {
+    wallet: GasAbstractionArgs["wallet"];
+    chain: ChainConfig;
+    feeToken: FeeToken;
+    memo?: string;
+    buildBundle: (feeAmount: bigint) => Promise<RelayerBundleEntry[]>;
+  },
+): Promise<GasAbstractionExecuteResult> {
+  const { wallet, chain, feeToken, buildBundle } = args;
 
   // First abstracted send of an un-upgraded EOA carries the EIP-7702
   // authorization so the relayer upgrades + redeems in one request.
@@ -294,107 +363,15 @@ export async function runRelayerTransfer(
   // every honest 18dp quote.
   const feeSafetyMax = relayerFeeSafetyMaxAtoms(feeToken.decimals);
 
-  // Signs one `Erc20TransferAmount` delegation to the relayer's target.
-  const signScopedDelegation = async (
-    tokenAddress: string,
-    maxAmount: bigint,
-  ): Promise<DelegationStruct> => {
-    const unsigned = await kit.createDelegation!({
-      wallet,
-      chain,
-      delegate: chainCaps.targetAddress,
-      scope: {
-        type: "erc20TransferAmount",
-        tokenAddress,
-        maxAmount,
-      },
-      salt: randomSaltHex(),
-    });
-    // SI-4: the delegate (redeemer) must be the relayer's target address.
-    if (!eqAddr(unsigned.delegate, chainCaps.targetAddress)) {
-      throw new GasAbstractionUnavailableError("redeemer address mismatch");
-    }
-    const signature = await kit.signDelegation!({
-      wallet,
-      chain,
-      delegation: unsigned,
-    });
-    return { ...unsigned, signature };
-  };
-
-  const buildSignedBundle = async (
-    feeAmount: bigint,
-  ): Promise<RelayerBundleEntry[]> => {
-    if (sameToken) {
-      // Sending the fee token itself: one delegation scoped to fee + work
-      // covers both legs in a single bundle entry (skill Example 1b).
-      const signed = await signScopedDelegation(
-        feeToken.address,
-        feeAmount + intent.amount,
-      );
-      return [
-        {
-          permissionContext: [signed],
-          executions: [
-            buildErc20TransferExecution(
-              feeToken.address,
-              chainCaps.feeCollector,
-              feeAmount,
-            ),
-            buildErc20TransferExecution(
-              feeToken.address,
-              intent.to,
-              intent.amount,
-            ),
-          ],
-        },
-      ];
-    }
-    // Sending a different token (e.g. IDRX): a fee-token delegation and a
-    // work-token delegation, batched as two bundle entries the relayer
-    // merges into one on-chain redeemDelegations (skill Example 2). One
-    // authorizationList entry still covers both — same delegator EOA.
-    const feeDelegation = await signScopedDelegation(
-      feeToken.address,
-      feeAmount,
-    );
-    const workDelegation = await signScopedDelegation(
-      intent.tokenAddress,
-      intent.amount,
-    );
-    return [
-      {
-        permissionContext: [feeDelegation],
-        executions: [
-          buildErc20TransferExecution(
-            feeToken.address,
-            chainCaps.feeCollector,
-            feeAmount,
-          ),
-        ],
-      },
-      {
-        permissionContext: [workDelegation],
-        executions: [
-          buildErc20TransferExecution(
-            intent.tokenAddress,
-            intent.to,
-            intent.amount,
-          ),
-        ],
-      },
-    ];
-  };
-
   // Mock fee starts at the relayer's floor; the estimate returns the real
-  // required amount, which we honor with one re-sign if it changed.
+  // required amount, which we honor with one rebuild if it changed.
   const feeData = await kit.getRelayerFeeData({
     chain,
     token: feeToken.address,
   });
   let feeAmount = feeData.minFee > 0n ? feeData.minFee : 1n;
 
-  let bundle = await buildSignedBundle(feeAmount);
+  let bundle = await buildBundle(feeAmount);
   let estimate = await kit.estimate7710Transaction({
     chain,
     transactions: bundle,
@@ -412,7 +389,7 @@ export async function runRelayerTransfer(
     estimate.requiredPaymentAmount !== feeAmount
   ) {
     feeAmount = estimate.requiredPaymentAmount;
-    bundle = await buildSignedBundle(feeAmount);
+    bundle = await buildBundle(feeAmount);
     estimate = await kit.estimate7710Transaction({
       chain,
       transactions: bundle,
@@ -443,7 +420,7 @@ export async function runRelayerTransfer(
         transactions: bundle,
         context,
         authorizationList: authList,
-        memo: intent.memo,
+        memo: args.memo,
       });
       // Surface the final price-locked fee + token so callers (the send
       // success screen) can show what gas was paid in.
@@ -472,6 +449,256 @@ export async function runRelayerTransfer(
     }
   }
   throw lastError ?? new GasAbstractionUnavailableError("relayer send failed");
+}
+
+/** The fee leg: one delegation capped at the fee, paid to `feeCollector`. */
+async function signFeeEntry(
+  kit: FullRelayerKit,
+  args: {
+    wallet: GasAbstractionArgs["wallet"];
+    chain: ChainConfig;
+    chainCaps: RelayerChainCapabilities;
+    feeToken: FeeToken;
+    feeAmount: bigint;
+  },
+): Promise<RelayerBundleEntry> {
+  const delegation = await signRelayerDelegation(kit, {
+    ...args,
+    scope: {
+      type: "erc20TransferAmount",
+      tokenAddress: args.feeToken.address,
+      maxAmount: args.feeAmount,
+    },
+  });
+  return {
+    permissionContext: [delegation],
+    executions: [
+      buildErc20TransferExecution(
+        args.feeToken.address,
+        args.chainCaps.feeCollector,
+        args.feeAmount,
+      ),
+    ],
+  };
+}
+
+/**
+ * Full price-lock loop for a token transfer: optional in-flight EIP-7702
+ * upgrade, build + sign the delegation, estimate, re-sign if the required
+ * fee changed, submit.
+ */
+export async function runRelayerTransfer(
+  kit: RelayerKit,
+  args: GasAbstractionArgs,
+): Promise<GasAbstractionExecuteResult> {
+  const { wallet, chain, intent } = args;
+  const { chainCaps, feeToken, sameToken } = await resolveRelayerContext(
+    kit,
+    args,
+  );
+  assertFullRelayerKit(kit);
+
+  const buildBundle = async (
+    feeAmount: bigint,
+  ): Promise<RelayerBundleEntry[]> => {
+    if (sameToken) {
+      // Sending the fee token itself: one delegation scoped to fee + work
+      // covers both legs in a single bundle entry (skill Example 1b).
+      const signed = await signRelayerDelegation(kit, {
+        wallet,
+        chain,
+        chainCaps,
+        scope: {
+          type: "erc20TransferAmount",
+          tokenAddress: feeToken.address,
+          maxAmount: feeAmount + intent.amount,
+        },
+      });
+      return [
+        {
+          permissionContext: [signed],
+          executions: [
+            buildErc20TransferExecution(
+              feeToken.address,
+              chainCaps.feeCollector,
+              feeAmount,
+            ),
+            buildErc20TransferExecution(
+              feeToken.address,
+              intent.to,
+              intent.amount,
+            ),
+          ],
+        },
+      ];
+    }
+    // Sending a different token (e.g. IDRX): a fee-token delegation and a
+    // work-token delegation, batched as two bundle entries the relayer
+    // merges into one on-chain redeemDelegations (skill Example 2). One
+    // authorizationList entry still covers both — same delegator EOA.
+    const feeEntry = await signFeeEntry(kit, {
+      wallet,
+      chain,
+      chainCaps,
+      feeToken,
+      feeAmount,
+    });
+    const workDelegation = await signRelayerDelegation(kit, {
+      wallet,
+      chain,
+      chainCaps,
+      scope: {
+        type: "erc20TransferAmount",
+        tokenAddress: intent.tokenAddress,
+        maxAmount: intent.amount,
+      },
+    });
+    return [
+      feeEntry,
+      {
+        permissionContext: [workDelegation],
+        executions: [
+          buildErc20TransferExecution(
+            intent.tokenAddress,
+            intent.to,
+            intent.amount,
+          ),
+        ],
+      },
+    ];
+  };
+
+  return submitPriceLocked(kit, {
+    wallet,
+    chain,
+    feeToken,
+    memo: intent.memo,
+    buildBundle,
+  });
+}
+
+/** Upper-bound gas for a fee transfer plus one or two contract calls. */
+export const CALLS_GAS_UPPER_BOUND = 400_000n;
+
+/** The 4-byte selector at the head of `data`. */
+function selectorOf(data: string): string {
+  if (!/^0x[0-9a-fA-F]{8}/.test(data)) {
+    throw new GasAbstractionUnavailableError("call without a selector");
+  }
+  return data.slice(0, 10).toLowerCase();
+}
+
+export async function quoteRelayerCalls(
+  kit: RelayerKit,
+  args: GasAbstractionCallsArgs,
+): Promise<GasAbstractionQuote> {
+  const { feeToken } = await resolveFeeToken(
+    kit,
+    args.chain,
+    args.feeTokenSymbol,
+  );
+  if (!kit.getRelayerFeeData) {
+    throw new GasAbstractionUnavailableError("relayer fee data unsupported");
+  }
+  const feeData = await kit.getRelayerFeeData({
+    chain: args.chain,
+    token: feeToken.address,
+  });
+  const feeAmount = computeRoughFee(
+    feeData,
+    args.intent.gasUpperBound ?? CALLS_GAS_UPPER_BOUND,
+  );
+  const spend = args.intent.walletSpend?.({
+    amount: feeAmount,
+    token: feeToken,
+  });
+  const spent =
+    spend && eqAddr(spend.tokenAddress, feeToken.address) ? spend.amount : 0n;
+  const credit = args.intent.walletCredit;
+  const credited =
+    args.intent.feeAfterCalls &&
+    credit &&
+    eqAddr(credit.tokenAddress, feeToken.address)
+      ? credit.amount
+      : 0n;
+  const owed = feeAmount + spent - credited;
+  const totalRequired = owed > 0n ? owed : 0n;
+  return {
+    providerId: ONE_SHOT_PROVIDER_ID,
+    feeToken,
+    feeAmount,
+    totalRequired,
+  };
+}
+
+/**
+ * Price-lock loop for contract calls. The bundle is a fee entry plus one
+ * entry per call, each under its own `functionCall` delegation limited to
+ * that call's target, its selector, zero native value and its exact
+ * calldata. The relayer can run exactly these calls and nothing else.
+ */
+export async function runRelayerCalls(
+  kit: RelayerKit,
+  args: GasAbstractionCallsArgs,
+): Promise<GasAbstractionExecuteResult> {
+  const { wallet, chain, intent } = args;
+  const { chainCaps, feeToken } = await resolveFeeToken(
+    kit,
+    chain,
+    args.feeTokenSymbol,
+  );
+  assertFullRelayerKit(kit);
+
+  const buildBundle = async (
+    feeAmount: bigint,
+  ): Promise<RelayerBundleEntry[]> => {
+    const calls = await intent.buildCalls({
+      amount: feeAmount,
+      token: feeToken,
+    });
+    if (calls.length === 0) {
+      throw new GasAbstractionUnavailableError("no calls to relay");
+    }
+    const feeEntry = await signFeeEntry(kit, {
+      wallet,
+      chain,
+      chainCaps,
+      feeToken,
+      feeAmount,
+    });
+    const entries: RelayerBundleEntry[] = intent.feeAfterCalls
+      ? []
+      : [feeEntry];
+    for (const call of calls) {
+      const delegation = await signRelayerDelegation(kit, {
+        wallet,
+        chain,
+        chainCaps,
+        scope: {
+          type: "functionCall",
+          targets: [call.target],
+          methods: [selectorOf(call.data)],
+          exactCalldata: call.data,
+        },
+      });
+      entries.push({
+        permissionContext: [delegation],
+        executions: [{ target: call.target, value: 0n, data: call.data }],
+      });
+    }
+    // The relayer finds the fee leg by scanning the executions for the
+    // transfer to `feeCollector`, so it may come after the calls.
+    if (intent.feeAfterCalls) entries.push(feeEntry);
+    return entries;
+  };
+
+  return submitPriceLocked(kit, {
+    wallet,
+    chain,
+    feeToken,
+    memo: intent.memo,
+    buildBundle,
+  });
 }
 
 function resolveEvmKit(): RelayerKit {
@@ -508,6 +735,16 @@ export function createOneShotRelayerProvider(): GasAbstractionProvider {
 
     execute(args: GasAbstractionArgs): Promise<GasAbstractionExecuteResult> {
       return runRelayerTransfer(resolveEvmKit(), args);
+    },
+
+    getCallsQuote(args: GasAbstractionCallsArgs): Promise<GasAbstractionQuote> {
+      return quoteRelayerCalls(resolveEvmKit(), args);
+    },
+
+    executeCalls(
+      args: GasAbstractionCallsArgs,
+    ): Promise<GasAbstractionExecuteResult> {
+      return runRelayerCalls(resolveEvmKit(), args);
     },
 
     async getStatus({ chain, taskId }) {

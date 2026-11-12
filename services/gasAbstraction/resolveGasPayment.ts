@@ -22,11 +22,14 @@ import { walletKitRegistry } from "@/services/walletKit/registry";
 import { gasAbstractionRegistry } from "./registry";
 import { isGasAbstractionSupported } from "./supportedChains";
 import {
+  type CallsGasAbstractionProvider,
+  type ContractCallsIntent,
   type FeeToken,
   type GasAbstractionProvider,
   type GasAbstractionQuote,
   type GasFeeTokenPreference,
   isNativeGasPreference,
+  relaysContractCalls,
   type TransferIntent,
 } from "./types";
 
@@ -125,6 +128,82 @@ export async function resolveGasPayment(
   // Log the gate inputs (fee-token address + needed/have) so a wrong-token
   // or wrong-address balance read is diagnosable in dev.
   logDev("blocked: insufficient fee-token balance", {
+    feeToken: quote.feeToken.address,
+    feeTokenSymbol: quote.feeToken.symbol,
+    needed: quote.totalRequired.toString(),
+    have: have.toString(),
+  });
+  return {
+    mode: "blocked",
+    reason: "insufficient_balance",
+    feeToken: quote.feeToken,
+    needed: quote.totalRequired,
+    have,
+  };
+}
+
+export type CallsGasPaymentPlan =
+  /** The relayer doesn't apply: the caller's own native-gas path runs. */
+  | { mode: "native" }
+  | {
+      mode: "abstracted";
+      provider: CallsGasAbstractionProvider;
+      quote: GasAbstractionQuote;
+    }
+  /** Stablecoin gas applies but the wallet can't cover what it needs. */
+  | {
+      mode: "blocked";
+      reason: "insufficient_balance";
+      feeToken: FeeToken;
+      needed: bigint;
+      have: bigint;
+    };
+
+export interface ResolveCallsGasPaymentArgs {
+  wallet: TWallet;
+  chain: ChainConfig;
+  intent: ContractCallsIntent;
+  preferredGasToken: GasFeeTokenPreference;
+}
+
+/**
+ * `resolveGasPayment` for contract calls, under the same policy: the
+ * chosen stablecoin when it applies, else block, never a silent switch to
+ * native gas. Native only when the preference is native, the chain isn't
+ * served, the provider can't relay calls, or the symbol isn't accepted.
+ */
+export async function resolveCallsGasPayment(
+  { wallet, chain, intent, preferredGasToken }: ResolveCallsGasPaymentArgs,
+  deps: ResolveGasPaymentDeps = {},
+): Promise<CallsGasPaymentPlan> {
+  const resolveProvider =
+    deps.resolveProvider ??
+    ((c: ChainConfig) => gasAbstractionRegistry.resolveProvider(c));
+  const getTokenBalance = deps.getTokenBalance ?? defaultGetTokenBalance;
+
+  if (isNativeGasPreference(preferredGasToken)) return { mode: "native" };
+  if (!isGasAbstractionSupported(chain)) return { mode: "native" };
+  const provider = resolveProvider(chain);
+  if (!provider || !relaysContractCalls(provider)) return { mode: "native" };
+
+  let quote: GasAbstractionQuote;
+  try {
+    quote = await provider.getCallsQuote({
+      wallet,
+      chain,
+      intent,
+      feeTokenSymbol: preferredGasToken,
+    });
+  } catch (err) {
+    logDev("calls not eligible, using native gas", err);
+    return { mode: "native" };
+  }
+
+  const have = await getTokenBalance(wallet, chain, quote.feeToken.address);
+  if (have >= quote.totalRequired) {
+    return { mode: "abstracted", provider, quote };
+  }
+  logDev("calls blocked: insufficient fee-token balance", {
     feeToken: quote.feeToken.address,
     feeTokenSymbol: quote.feeToken.symbol,
     needed: quote.totalRequired.toString(),

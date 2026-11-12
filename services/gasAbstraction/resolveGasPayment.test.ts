@@ -11,8 +11,16 @@ import { describe, it } from "node:test";
 import { baseSepolia, mainnet } from "viem/chains";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import type { TWallet } from "@/constants/types/walletTypes";
-import { type GasPaymentPlan, resolveGasPayment } from "./resolveGasPayment";
-import type { GasAbstractionProvider, GasAbstractionQuote } from "./types";
+import {
+  type GasPaymentPlan,
+  resolveCallsGasPayment,
+  resolveGasPayment,
+} from "./resolveGasPayment";
+import type {
+  ContractCallsIntent,
+  GasAbstractionProvider,
+  GasAbstractionQuote,
+} from "./types";
 
 const USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 const chain: ChainConfig = { namespace: "eip155", chain: baseSepolia };
@@ -131,6 +139,73 @@ describe("resolveGasPayment", () => {
       assert.equal(plan.reason, "insufficient_balance");
       assert.equal(plan.needed, 600_000n);
       assert.equal(plan.have, 550_000n);
+    }
+  });
+});
+
+describe("resolveCallsGasPayment", () => {
+  const callsIntent: ContractCallsIntent = {
+    buildCalls: async () => [{ target: "0x3", data: "0xabcdef01" }],
+  };
+  const callsQuote: GasAbstractionQuote = {
+    ...quote,
+    totalRequired: 2_000_000n,
+  };
+  const callsProvider = (overrides: Partial<GasAbstractionProvider> = {}) =>
+    fakeProvider({
+      getCallsQuote: async () => callsQuote,
+      executeCalls: async () => ({ providerId: "1shot", taskId: "0xt" }),
+      ...overrides,
+    });
+
+  it("returns native when preference is native", async () => {
+    const plan = await resolveCallsGasPayment(
+      { wallet, chain, intent: callsIntent, preferredGasToken: "native" },
+      deps(callsProvider(), 10_000_000n),
+    );
+    assert.equal(plan.mode, "native");
+  });
+
+  it("returns native when the provider only relays transfers", async () => {
+    const plan = await resolveCallsGasPayment(
+      { wallet, chain, intent: callsIntent, preferredGasToken: "USDC" },
+      deps(fakeProvider(), 10_000_000n),
+    );
+    assert.equal(plan.mode, "native");
+  });
+
+  it("returns native when the quote declines", async () => {
+    const plan = await resolveCallsGasPayment(
+      { wallet, chain, intent: callsIntent, preferredGasToken: "USDC" },
+      deps(
+        callsProvider({
+          getCallsQuote: async () => {
+            throw new Error("not accepted");
+          },
+        }),
+        10_000_000n,
+      ),
+    );
+    assert.equal(plan.mode, "native");
+  });
+
+  it("abstracts when the wallet covers what the quote requires", async () => {
+    const plan = await resolveCallsGasPayment(
+      { wallet, chain, intent: callsIntent, preferredGasToken: "USDC" },
+      deps(callsProvider(), 2_000_000n),
+    );
+    assert.equal(plan.mode, "abstracted");
+  });
+
+  it("blocks instead of spending native gas when the wallet is short", async () => {
+    const plan = await resolveCallsGasPayment(
+      { wallet, chain, intent: callsIntent, preferredGasToken: "USDC" },
+      deps(callsProvider(), 1_999_999n),
+    );
+    assert.equal(plan.mode, "blocked");
+    if (plan.mode === "blocked") {
+      assert.equal(plan.needed, 2_000_000n);
+      assert.equal(plan.have, 1_999_999n);
     }
   });
 });

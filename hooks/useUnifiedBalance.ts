@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import type { TWallet } from "@/constants/types/walletTypes";
 import { useBlockchains } from "@/hooks/queries/useBlockchains";
+import { usePreferredGasToken } from "@/hooks/usePreferredGasToken";
 import { buildChainConfigFromBlockchain } from "@/hooks/useWallet.helpers";
 import { storage } from "@/lib/storage/mmkv";
 import {
@@ -199,6 +200,7 @@ export function useUnifiedBalanceTopUp(args: {
     | undefined;
 }) {
   const ub = useUnifiedBalanceFor(args);
+  const { preferredGasToken } = usePreferredGasToken();
   const lookupChain = useChainConfigLookup();
   const invalidate = useInvalidateUnifiedBalance();
   const { ctx, applies, decimals, data } = ub;
@@ -238,13 +240,24 @@ export function useUnifiedBalanceTopUp(args: {
           needRaw: t.needRaw + headroomRaw,
           readWalletRaw: t.readWalletRaw,
           lookupChain,
+          // A relayed mint pays its fee out of what arrives; the top-up
+          // grows by it so the wallet still reaches the need.
+          preferredGasToken,
         });
       } finally {
         invalidate();
       }
       return true;
     },
-    [applies, ctx, wallet, decimals, lookupChain, invalidate],
+    [
+      applies,
+      ctx,
+      wallet,
+      decimals,
+      lookupChain,
+      invalidate,
+      preferredGasToken,
+    ],
   );
 
   return {

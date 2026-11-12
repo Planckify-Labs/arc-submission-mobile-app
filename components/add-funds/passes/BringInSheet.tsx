@@ -22,6 +22,7 @@ import {
   type BringInSummary,
   decimalToRaw,
   type EditableBringInRow,
+  joinNetworks,
   MIN_BRING_IN,
   rawToUsdcCeil,
   UNIFIED_BALANCE_DECIMALS,
@@ -243,7 +244,7 @@ function rowNote(args: {
   const { row, summary, isFast } = args;
   if (row.status !== "ok") {
     return {
-      text: `Needs a little ${row.nativeSymbol} on ${row.label} for the fee`,
+      text: `Needs a little ${row.gasSymbol} on ${row.label} for the fee`,
       warn: true,
     };
   }
@@ -256,7 +257,12 @@ function rowNote(args: {
     case "too_small":
       return { text: "Enter at least 0.01 USDC", warn: true };
     case "below_fee":
-      return { text: "Too small for the faster route", warn: true };
+      return {
+        text: isFast
+          ? "Too small for the faster route"
+          : "Too small to cover the network fee",
+        warn: true,
+      };
     default:
       break;
   }
@@ -266,13 +272,38 @@ function rowNote(args: {
       warn: false,
     };
   }
-  return {
-    text:
-      row.timing === "seconds"
-        ? "Ready in seconds"
-        : "Can take up to about 15 minutes",
-    warn: false,
-  };
+  const timing =
+    row.timing === "seconds"
+      ? "Ready in seconds"
+      : "Can take up to about 15 minutes";
+  if (row.gasPaidIn === "stablecoin") {
+    return {
+      text:
+        row.gasFeeRaw > 0n
+          ? `Fee about ${fmtFee(row.gasFeeRaw)} USDC, taken from this amount · ${timing.toLowerCase()}`
+          : `Fee paid in ${row.gasSymbol} · ${timing.toLowerCase()}`,
+      warn: false,
+    };
+  }
+  return { text: timing, warn: false };
+}
+
+/** Where each selected network's fee comes from, in one or two lines. */
+function feeSourceLine(
+  rows: EditableBringInRow[],
+  selected: Record<string, boolean>,
+): string {
+  const on = rows.filter((r) => r.status === "ok" && selected[r.identifier]);
+  const viaStablecoin = on.filter((r) => r.gasPaidIn === "stablecoin");
+  if (viaStablecoin.length === 0) {
+    return "Each network's fee is paid in its own coin, from your wallet.";
+  }
+  const symbols = [...new Set(viaStablecoin.map((r) => r.gasSymbol))];
+  const names = joinNetworks(viaStablecoin.map((r) => r.label));
+  const paid = `Fees on ${names} are paid in ${joinNetworks(symbols)}, as set in Gas Settings.`;
+  return viaStablecoin.length === on.length
+    ? paid
+    : `${paid} Other networks pay in their own coin.`;
 }
 
 /**
@@ -282,8 +313,10 @@ function rowNote(args: {
  * whole balance, Max restores it). Every number is honest about where it
  * lands: the title is what arrives, the line under it what leaves the
  * wallet, and a row on the faster route shows "from wallet → arrives".
- * Each deposit is its own transaction paid in that network's gas coin; a
- * network without enough of it is greyed out with the reason. The standard
+ * Each deposit is its own transaction. Its fee is paid in the network's gas
+ * coin, or in the Gas Settings stablecoin where the relayer takes it (a
+ * USDC fee comes out of what arrives); a network that can't pay is greyed
+ * out with the reason. The standard
  * route is the default; "Make it faster" opts one network into the faster
  * route where Circle quotes it.
  *
@@ -463,7 +496,7 @@ function BringInSheet({
             style={{ gap: 4 }}
           >
             <Text className="text-xs text-light-matte-black/70">
-              Each network's fee is paid in its own coin, from your wallet.
+              {feeSourceLine(rows, selected)}
             </Text>
             {anyFasterOffered ? (
               <Text className="text-xs text-light-matte-black/70">

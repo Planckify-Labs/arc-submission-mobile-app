@@ -27,6 +27,7 @@ import ChainSelector from "@/components/common/ChainSelector";
 import LoadinngSpinnerPopup from "@/components/common/LoadinngSpinnerPopup";
 import PinConfirmationModal from "@/components/common/PinConfirmationModal";
 import QKEY_Wallets from "@/constants/queryKeys/walletQueryKeys";
+import { usePreferredGasToken } from "@/hooks/usePreferredGasToken";
 import {
   useChainConfigLookup,
   useInvalidateUnifiedBalance,
@@ -39,6 +40,8 @@ import {
   addWalletUsdcToUnifiedBalance,
   decimalToRaw,
   moveUnifiedBalanceToWallet,
+  quoteDepositGas,
+  quoteMoveGas,
   rawToUsdcCeil,
   UNIFIED_BALANCE_DECIMALS,
   UnifiedBalanceError,
@@ -61,8 +64,42 @@ const ERROR_COPY: Record<UnifiedBalanceErrorCode, string> = {
   user_cancelled: "Cancelled. Nothing was moved.",
   unavailable:
     "We couldn't reach the network. Check your connection and try again.",
+  still_processing:
+    "This is still processing on the network. Check your Unified Balance in a few minutes before trying again.",
   failed: "We couldn't complete this. Nothing was moved. Please try again.",
 };
+
+/** A fee to 2 decimals, rounded up so it's never understated. */
+function feeDisplay(raw: bigint, decimals: number): string {
+  if (decimals < 2) return raw.toString();
+  const unit = 10n ** BigInt(decimals - 2);
+  if (raw > 0n && raw < unit) return "under 0.01";
+  const cents = (raw + unit - 1n) / unit;
+  return `${cents / 100n}.${(cents % 100n).toString().padStart(2, "0")}`;
+}
+
+/** The network fee line for an add or a move paid through Gas Settings. */
+function relayedFeeLine(
+  gas: Exclude<Awaited<ReturnType<typeof quoteDepositGas>>, { mode: "native" }>,
+  amountRaw: bigint,
+  chainLabel: string,
+  mode: Mode,
+): string {
+  const symbol = gas.feeToken.symbol;
+  if (gas.mode === "blocked") {
+    return `Not enough ${symbol} on ${chainLabel} for the network fee. Add some, or change the fee currency in Gas Settings.`;
+  }
+  const fee = `Network fee about ${feeDisplay(gas.feeRaw, gas.feeToken.decimals)} ${symbol}`;
+  if (!gas.feeFromUsdc) return `${fee}, paid from your wallet.`;
+  const from = mode === "add" ? "this amount" : "what arrives";
+  if (amountRaw > gas.feeRaw) {
+    const net = toDisplay(amountRaw - gas.feeRaw);
+    return mode === "add"
+      ? `${fee}, taken from ${from}. You'll add about ${net} USDC.`
+      : `${fee}, taken from ${from}. You'll receive about ${net} USDC.`;
+  }
+  return `${fee}, taken from ${from}.`;
+}
 
 function toDisplay(raw: bigint): string {
   return formatTokenAmount(rawToUsdcCeil(raw, UNIFIED_BALANCE_DECIMALS), {
@@ -74,6 +111,7 @@ export default function UnifiedBalanceScreen() {
   const params = useLocalSearchParams<{ mode?: string }>();
   const mode: Mode = params.mode === "move" ? "move" : "add";
   const { activeWallet, activeChain, getKitForWallet } = useWallet();
+  const { preferredGasToken } = usePreferredGasToken();
   const queryClient = useQueryClient();
   const lookupChain = useChainConfigLookup();
   const invalidateUnified = useInvalidateUnifiedBalance();
@@ -120,14 +158,69 @@ export default function UnifiedBalanceScreen() {
     return raw > reserve ? raw - reserve : 0n;
   }, [mode, unified.data?.confirmed, walletUsdc.data, ctx?.facts.nativeIsUsdc]);
 
+  // How an add's network fee is paid under Gas Settings: a stablecoin the
+  // relayer takes here means no gas coin is needed. Quoted on the whole
+  // balance; the fee doesn't depend on the amount.
+  const depositGas = useQuery({
+    queryKey: [
+      "unified-balance-deposit-gas",
+      activeWallet?.address,
+      chainCacheKey(activeChain),
+      preferredGasToken,
+      availableRaw.toString(),
+    ],
+    queryFn: () =>
+      quoteDepositGas({
+        ctx: ctx!,
+        wallet: activeWallet,
+        budgetRaw: availableRaw,
+        preferredGasToken,
+      }),
+    enabled: mode === "add" && !!ctx && !!activeWallet && availableRaw > 0n,
+    staleTime: 30_000,
+  });
+  // A move's mint is relayed the same way, its fee paid out of what
+  // arrives, so no gas coin is needed on this network either.
+  const moveGas = useQuery({
+    queryKey: [
+      "unified-balance-move-gas",
+      activeWallet?.address,
+      chainCacheKey(activeChain),
+      preferredGasToken,
+      availableRaw.toString(),
+    ],
+    queryFn: () =>
+      quoteMoveGas({
+        ctx: ctx!,
+        wallet: activeWallet,
+        amountRaw: availableRaw,
+        preferredGasToken,
+      }),
+    enabled: mode === "move" && !!ctx && !!activeWallet && availableRaw > 0n,
+    staleTime: 30_000,
+  });
+  const gasQuery = mode === "add" ? depositGas : moveGas;
+  const gas = gasQuery.data;
+  const usdcFeeRaw =
+    gas?.mode === "relayer" && gas.feeFromUsdc ? gas.feeRaw : 0n;
+
   const amountRaw = decimalToRaw(amount, UNIFIED_BALANCE_DECIMALS);
   const amountError =
     amount && amountRaw > availableRaw
       ? mode === "add"
         ? "That's more USDC than this wallet has here."
         : "That's more than your Unified Balance."
-      : null;
-  const canSubmit = !!ctx && amountRaw > 0n && !amountError && !busy;
+      : amount && amountRaw > 0n && usdcFeeRaw > 0n && amountRaw <= usdcFeeRaw
+        ? "That's too small to cover the network fee."
+        : null;
+  const gasBlocked = gas?.mode === "blocked";
+  const canSubmit =
+    !!ctx &&
+    amountRaw > 0n &&
+    !amountError &&
+    !gasBlocked &&
+    !(gasQuery.isFetching && !gas) &&
+    !busy;
 
   const run = useCallback(async () => {
     if (!ctx || !activeWallet) return;
@@ -141,6 +234,7 @@ export default function UnifiedBalanceScreen() {
           wallet: activeWallet,
           amount: value,
           lookupChain,
+          preferredGasToken,
         });
       } else {
         await moveUnifiedBalanceToWallet({
@@ -148,6 +242,7 @@ export default function UnifiedBalanceScreen() {
           wallet: activeWallet,
           amount: value,
           lookupChain,
+          preferredGasToken,
         });
       }
       track("feature_opened", {
@@ -173,6 +268,7 @@ export default function UnifiedBalanceScreen() {
     lookupChain,
     invalidateUnified,
     queryClient,
+    preferredGasToken,
   ]);
 
   const title = mode === "add" ? "Add to Unified Balance" : "Move to wallet";
@@ -290,6 +386,17 @@ export default function UnifiedBalanceScreen() {
                   {amountError ? (
                     <Text className="text-light-primary-red text-xs mt-2">
                       {amountError}
+                    </Text>
+                  ) : null}
+                  {gas && gas.mode !== "native" ? (
+                    <Text
+                      className={`text-xs mt-2 ${
+                        gasBlocked
+                          ? "text-light-primary-red"
+                          : "text-light-matte-black/70"
+                      }`}
+                    >
+                      {relayedFeeLine(gas, amountRaw, chainLabel, mode)}
                     </Text>
                   ) : null}
                   <Text className="text-light-matte-black/60 text-xs mt-3">

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyBringInAmounts,
   type BringInCandidate,
+  bringInDepositRaw,
+  bringInGasFeeRaw,
   deriveUnifiedPass,
   joinNetworks,
   PASS_REST_COLOR,
@@ -50,6 +52,35 @@ describe("planBringIn", () => {
 
   it("drops dust that isn't worth its own fee", () => {
     expect(planBringIn([evm({ usdcRaw: 5_000n })])).toEqual([]);
+  });
+
+  it("pays in USDC via the relayer with no ETH at all", () => {
+    const [row] = planBringIn([
+      evm({
+        nativeRaw: 0n,
+        stablecoinGas: { status: "ok", symbol: "USDC", usdcFeeRaw: 12_000n },
+      }),
+    ]);
+    expect(row.status).toBe("ok");
+    expect(row.gasPaidIn).toBe("stablecoin");
+    expect(row.gasFeeRaw).toBe(12_000n);
+    // What leaves the wallet is the whole balance; the fee comes out of it.
+    expect(row.amountRaw).toBe(15_000_000n);
+  });
+
+  it("flags a chain whose stablecoin can't cover the fee, naming it", () => {
+    const [row] = planBringIn([
+      evm({ stablecoinGas: { status: "short", symbol: "USDT" } }),
+    ]);
+    expect(row.status).toBe("needs_gas");
+    expect(row.gasSymbol).toBe("USDT");
+  });
+
+  it("names the gas coin when the native route applies", () => {
+    const [row] = planBringIn([evm({ nativeRaw: 0n })]);
+    expect(row.gasPaidIn).toBe("native");
+    expect(row.gasSymbol).toBe("ETH");
+    expect(row.gasFeeRaw).toBe(0n);
   });
 });
 
@@ -187,6 +218,29 @@ describe("Bring in amounts", () => {
     expect(s.rows.map((r) => r.identifier)).toEqual(["Base"]);
   });
 
+  it("takes a USDC network fee out of what arrives", () => {
+    const [row] = planBringIn([
+      evm({
+        nativeRaw: 0n,
+        stablecoinGas: { status: "ok", symbol: "USDC", usdcFeeRaw: 12_000n },
+      }),
+    ]);
+    const s = summarizeBringIn({
+      rows: applyBringInAmounts([row], {}),
+      selected: { Base: true },
+      fasterFeeRaw: {},
+    });
+    expect(s.fromWalletRaw).toBe(15_000_000n);
+    expect(s.arrivesRaw).toBe(14_988_000n);
+    expect(
+      summarizeBringIn({
+        rows: applyBringInAmounts([row], { Base: 15_000n }),
+        selected: { Base: true },
+        fasterFeeRaw: {},
+      }).rows[0].problem,
+    ).toBe("below_fee");
+  });
+
   it("blocks amounts over the balance, dust, and amounts eaten by the fee", () => {
     const s = summarizeBringIn({
       rows: applyBringInAmounts(base, {
@@ -205,5 +259,43 @@ describe("Bring in amounts", () => {
         fasterFeeRaw: {},
       }).rows[0].problem,
     ).toBe("too_small");
+  });
+});
+
+describe("faster route on a network paying gas in USDC", () => {
+  const [row] = planBringIn([
+    evm({
+      nativeRaw: 0n,
+      stablecoinGas: { status: "ok", symbol: "USDC", usdcFeeRaw: 10_000n },
+    }),
+  ]);
+
+  it("reserves a relayer fee per transaction: one standard, two faster", () => {
+    expect(bringInGasFeeRaw(row, false)).toBe(10_000n);
+    expect(bringInGasFeeRaw(row, true)).toBe(20_000n);
+  });
+
+  it("hands the standard deposit the whole amount (its fee comes out inside)", () => {
+    expect(bringInDepositRaw(row, 0n)).toBe(15_000_000n);
+  });
+
+  it("takes Circle's fee and both relayer fees off the faster burn", () => {
+    expect(bringInDepositRaw(row, 450_000n)).toBe(
+      15_000_000n - 450_000n - 20_000n,
+    );
+  });
+
+  it("shows what arrives net of every fee", () => {
+    const s = summarizeBringIn({
+      rows: applyBringInAmounts([row], {}),
+      selected: { Base: true },
+      fasterFeeRaw: { Base: 450_000n },
+    });
+    expect(s.arrivesRaw).toBe(15_000_000n - 450_000n - 20_000n);
+  });
+
+  it("leaves native-gas rows untouched by relayer fees", () => {
+    const [native] = planBringIn([evm({})]);
+    expect(bringInDepositRaw(native, 450_000n)).toBe(15_000_000n - 450_000n);
   });
 });

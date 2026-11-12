@@ -32,6 +32,37 @@ describe("mapScopeToSdk", () => {
     assert.equal(sdk.tokenAddress, USDC);
     assert.equal(sdk.maxAmount, 50_000_000n);
   });
+
+  // The Node harness stubs the SDK, so this pins the mapping; the real
+  // SDK turns `exactCalldata` into an ExactCalldataEnforcer caveat next to
+  // allowedTargets / allowedMethods / valueLte(0).
+  it("maps functionCall with pinned calldata", () => {
+    const calldata = `0xdeadbeef${"ab".repeat(64)}`;
+    const sdk = mapScopeToSdk({
+      type: "functionCall",
+      targets: [USDC],
+      methods: ["0xdeadbeef"],
+      exactCalldata: calldata,
+    }) as {
+      type: string;
+      targets: string[];
+      selectors: string[];
+      exactCalldata?: { calldata: string };
+    };
+    assert.equal(sdk.type, "functionCall");
+    assert.deepEqual(sdk.targets, [USDC]);
+    assert.deepEqual(sdk.selectors, ["0xdeadbeef"]);
+    assert.equal(sdk.exactCalldata?.calldata, calldata);
+  });
+
+  it("leaves functionCall unpinned without exactCalldata", () => {
+    const sdk = mapScopeToSdk({
+      type: "functionCall",
+      targets: [USDC],
+      methods: ["0xdeadbeef"],
+    }) as { exactCalldata?: unknown };
+    assert.equal(sdk.exactCalldata, undefined);
+  });
 });
 
 describe("mapCaveatsToSdk", () => {

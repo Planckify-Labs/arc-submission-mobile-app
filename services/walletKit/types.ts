@@ -647,6 +647,12 @@ export interface DelegationScope {
   targets?: string[];
   /** Allowed function selectors / signatures for `functionCall`. */
   methods?: string[];
+  /**
+   * `functionCall` only: the one calldata the delegate may run, byte for
+   * byte (the SDK's ExactCalldata enforcer). Pins a single prepared call
+   * so the delegate can't change its arguments.
+   */
+  exactCalldata?: string;
 }
 
 /**

@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { ChainConfig } from "@/constants/configs/chainConfig";
 import QKEY_Wallets from "@/constants/queryKeys/walletQueryKeys";
 import type { TWallet } from "@/constants/types/walletTypes";
+import { usePreferredGasToken } from "@/hooks/usePreferredGasToken";
 import {
   useChainConfigLookup,
   useInvalidateUnifiedBalance,
@@ -14,12 +15,16 @@ import {
   addWalletUsdcToUnifiedBalance,
   type BringInCandidate,
   type BringInRow,
+  type BringInStablecoinGas,
+  bringInDepositRaw,
+  type DepositGas,
   deriveUnifiedPass,
   estimateFasterRoute,
   fasterRouteDestination,
   listUnifiedBalanceChains,
   type PassChainBalance,
   planBringIn,
+  quoteDepositGas,
   rawToUsdcCeil,
   UNIFIED_BALANCE_DECIMALS,
   UnifiedBalanceError,
@@ -36,6 +41,19 @@ const BRING_IN_QUERY_KEY = "unified-balance-bring-in";
 /** Several RPC reads per network: cached, refreshed on demand. */
 const BRING_IN_STALE_MS = 5 * 60_000;
 
+/** A deposit gas quote as the Bring in plan reads it. */
+function toStablecoinGas(gas: DepositGas): BringInStablecoinGas | null {
+  if (gas.mode === "native") return null;
+  if (gas.mode === "blocked") {
+    return { status: "short", symbol: gas.feeToken.symbol };
+  }
+  return {
+    status: "ok",
+    symbol: gas.feeToken.symbol,
+    usdcFeeRaw: gas.feeFromUsdc ? gas.feeRaw : 0n,
+  };
+}
+
 function prettyIdentifier(identifier: string): string {
   return identifier.replace(/_/g, " ");
 }
@@ -48,6 +66,7 @@ function prettyIdentifier(identifier: string): string {
  */
 export function useUnifiedBalancePasses() {
   const { activeWallet, activeChain } = useWallet();
+  const { preferredGasToken } = usePreferredGasToken();
   const lookupChain = useChainConfigLookup();
   const unified = useUnifiedBalance(activeWallet, activeChain);
   const ctx = unified.ctx;
@@ -80,6 +99,7 @@ export function useUnifiedBalancePasses() {
       ctx?.depositor ?? null,
       ctx?.facts.network ?? null,
       activeKey,
+      preferredGasToken,
     ],
     enabled: !!ctx && !!activeWallet,
     staleTime: BRING_IN_STALE_MS,
@@ -100,6 +120,20 @@ export function useUnifiedBalancePasses() {
               kit.getNativeBalance(activeWallet.address, config),
               ctx!.source.estimateDepositFeeWei(config),
             ]);
+            // How the fee would be paid under the gas setting; a stablecoin
+            // the relayer takes here means no gas coin is needed.
+            const chainCtx = unifiedBalanceContext(activeWallet, config);
+            const stablecoinGas =
+              chainCtx && usdcRaw > 0n
+                ? toStablecoinGas(
+                    await quoteDepositGas({
+                      ctx: chainCtx,
+                      wallet: activeWallet,
+                      budgetRaw: usdcRaw,
+                      preferredGasToken,
+                    }),
+                  )
+                : null;
             return {
               isActive: chainCacheKey(config) === activeKey,
               candidate: {
@@ -112,6 +146,7 @@ export function useUnifiedBalancePasses() {
                 nativeIsUsdc: entry.facts.nativeIsUsdc,
                 nativeDecimals: entry.facts.nativeDecimals,
                 nativeSymbol: getNativeSymbol(config) ?? "gas",
+                stablecoinGas,
               } satisfies BringInCandidate,
             };
           } catch (err) {
@@ -209,6 +244,8 @@ export function useFasterRouteQuotes(args: {
           out[row.identifier] = null;
           const config = args.lookupChain(row.chainId);
           const ctx = unifiedBalanceContext(args.wallet, config);
+          // The faster route's approve + burn are relayed like everything
+          // else, so it's offered wherever the row can pay its gas.
           if (!ctx || row.status !== "ok") return;
           const to = fasterRouteDestination(ctx);
           if (!to) return;
@@ -236,6 +273,7 @@ export function useBringInRunner(
   lookupChain: (id: number) => ChainConfig | undefined,
 ) {
   const { activeWallet } = useWallet();
+  const { preferredGasToken } = usePreferredGasToken();
   const queryClient = useQueryClient();
   const invalidateUnified = useInvalidateUnifiedBalance();
   const [steps, setSteps] = useState<Record<string, BringInStep>>({});
@@ -265,7 +303,8 @@ export function useBringInRunner(
           const feeRaw = fast
             ? usdcToRaw(fast.fee, UNIFIED_BALANCE_DECIMALS)
             : 0n;
-          const amountRaw = row.amountRaw - feeRaw;
+          // Fees that leave the wallet beside the deposit come off first.
+          const amountRaw = bringInDepositRaw(row, feeRaw);
           if (amountRaw <= 0n)
             throw new UnifiedBalanceError("insufficient_funds");
           const { done } = await addWalletUsdcToUnifiedBalance({
@@ -274,6 +313,7 @@ export function useBringInRunner(
             amount: rawToUsdcCeil(amountRaw, UNIFIED_BALANCE_DECIMALS),
             lookupChain,
             fastTo: fast?.to,
+            preferredGasToken,
           });
           const instant = done || row.timing === "seconds";
           setSteps((prev) => ({
@@ -283,7 +323,15 @@ export function useBringInRunner(
         } catch (err) {
           if (__DEV__)
             console.warn("[passes] bring in failed", row.chainId, err);
-          setSteps((prev) => ({ ...prev, [row.identifier]: "failed" }));
+          // Submitted but unconfirmed may still land: show it arriving, so
+          // a retry can't deposit twice.
+          const pending =
+            err instanceof UnifiedBalanceError &&
+            err.code === "still_processing";
+          setSteps((prev) => ({
+            ...prev,
+            [row.identifier]: pending ? "arriving" : "failed",
+          }));
         }
         invalidateUnified();
       }
@@ -291,7 +339,13 @@ export function useBringInRunner(
       void queryClient.invalidateQueries({ queryKey: [QKEY_Wallets.balance] });
       running.current = false;
     },
-    [activeWallet, lookupChain, invalidateUnified, queryClient],
+    [
+      activeWallet,
+      lookupChain,
+      invalidateUnified,
+      queryClient,
+      preferredGasToken,
+    ],
   );
 
   const reset = useCallback(() => setSteps({}), []);

@@ -61,25 +61,62 @@ export interface BringInCandidate {
   nativeDecimals: number;
   /** Gas coin symbol, for "needs a little ETH" copy. */
   nativeSymbol: string;
+  /**
+   * Set when the gas setting picks a stablecoin the relayer takes on this
+   * chain: the fee is paid in it instead of the gas coin. Null = gas coin.
+   */
+  stablecoinGas?: BringInStablecoinGas | null;
 }
 
+export type BringInStablecoinGas =
+  | {
+      status: "ok";
+      symbol: string;
+      /** Fee taken from the USDC moved (6 dp); 0 when another token pays. */
+      usdcFeeRaw: bigint;
+    }
+  /** The stablecoin applies but the wallet can't cover its fee. */
+  | { status: "short"; symbol: string };
+
 export interface BringInRow extends BringInCandidate {
-  /** What would be deposited, 6 decimals. */
+  /** What leaves the wallet, 6 decimals. */
   amountRaw: bigint;
   status: "ok" | "needs_gas";
   /** Standard-route timing. */
   timing: "seconds" | "minutes";
+  /** Who pays this row's network fee. */
+  gasPaidIn: "native" | "stablecoin";
+  /** Network fee taken from the USDC moved (6 dp), 0 when paid otherwise. */
+  gasFeeRaw: bigint;
+  /** The coin the fee is paid in, for "needs a little X" copy. */
+  gasSymbol: string;
 }
 
 /**
- * Decide, per chain, what Bring in would move and whether it can. Fees are
- * paid in the chain's own gas coin; a chain whose gas IS USDC pays from the
- * USDC itself (a small reserve stays behind), so it never needs a second
- * coin. Rows below `MIN_BRING_IN` are dropped.
+ * Decide, per chain, what Bring in would move and whether it can. When the
+ * gas setting picks a stablecoin the relayer takes on a chain, that chain's
+ * fee is paid in it (a USDC fee comes out of what's moved); otherwise fees
+ * are paid in the chain's own gas coin. A chain whose gas IS USDC pays
+ * from the USDC itself (a small reserve stays behind), so it never needs a
+ * second coin. Rows below `MIN_BRING_IN` are dropped.
  */
 export function planBringIn(candidates: BringInCandidate[]): BringInRow[] {
   const rows: BringInRow[] = [];
   for (const c of candidates) {
+    const sg = c.stablecoinGas;
+    if (sg && !c.nativeIsUsdc) {
+      if (c.usdcRaw < MIN_BRING_IN) continue;
+      rows.push({
+        ...c,
+        amountRaw: c.usdcRaw,
+        status: sg.status === "ok" ? "ok" : "needs_gas",
+        timing: "minutes",
+        gasPaidIn: "stablecoin",
+        gasFeeRaw: sg.status === "ok" ? sg.usdcFeeRaw : 0n,
+        gasSymbol: sg.symbol,
+      });
+      continue;
+    }
     const reserve = c.nativeIsUsdc ? NATIVE_USDC_BRING_IN_RESERVE : 0n;
     const amountRaw = c.usdcRaw > reserve ? c.usdcRaw - reserve : 0n;
     if (amountRaw < MIN_BRING_IN) continue;
@@ -93,6 +130,9 @@ export function planBringIn(candidates: BringInCandidate[]): BringInRow[] {
       amountRaw,
       status: hasGas ? "ok" : "needs_gas",
       timing: c.nativeIsUsdc ? "seconds" : "minutes",
+      gasPaidIn: "native",
+      gasFeeRaw: 0n,
+      gasSymbol: c.nativeSymbol,
     });
   }
   return rows.sort((a, b) => (b.amountRaw > a.amountRaw ? 1 : -1));
@@ -238,7 +278,10 @@ export interface BringInRowSummary {
   identifier: string;
   /** Leaves the wallet (6 decimals). */
   fromWalletRaw: bigint;
-  /** Lands in Unified Balance: the faster route's fee comes out of it. */
+  /**
+   * Lands in Unified Balance: the faster route's fee and a network fee
+   * paid in USDC both come out of it.
+   */
   arrivesRaw: bigint;
   problem: BringInRowProblem | null;
 }
@@ -252,10 +295,33 @@ export interface BringInSummary {
 }
 
 /**
+ * Relayer gas taken from a row's USDC: one transaction on the standard
+ * route (the signed deposit), up to two on the faster one (approve + burn,
+ * each relayed with its own fee). 0 when gas is paid any other way.
+ */
+export function bringInGasFeeRaw(row: BringInRow, faster: boolean): bigint {
+  return faster ? row.gasFeeRaw * 2n : row.gasFeeRaw;
+}
+
+/**
+ * What a Bring in row hands the deposit call, 6 decimals. The standard
+ * relayed deposit takes its USDC fee out of what it's given, so it gets
+ * the whole amount; the faster route's Circle fee and relayer fees leave
+ * the wallet beside the burn, so they come off first.
+ */
+export function bringInDepositRaw(
+  row: BringInRow,
+  fasterFeeRaw: bigint,
+): bigint {
+  if (fasterFeeRaw <= 0n) return row.amountRaw;
+  return row.amountRaw - fasterFeeRaw - bringInGasFeeRaw(row, true);
+}
+
+/**
  * The numbers the confirm sheet shows and the runner moves, per selected
  * row: what leaves the wallet and what arrives after the faster-route fee
- * (`fasterFeeRaw`, only for rows opted into it). Network gas is separate,
- * paid in each network's own coin.
+ * (`fasterFeeRaw`, only for rows opted into it) and any network fee paid in
+ * USDC (`gasFeeRaw`). Gas paid in a network's own coin is separate.
  */
 export function summarizeBringIn(args: {
   rows: EditableBringInRow[];
@@ -268,7 +334,8 @@ export function summarizeBringIn(args: {
   let blocked = false;
   for (const r of args.rows) {
     if (r.status !== "ok" || !args.selected[r.identifier]) continue;
-    const fee = args.fasterFeeRaw[r.identifier] ?? 0n;
+    const fasterFee = args.fasterFeeRaw[r.identifier] ?? 0n;
+    const fee = fasterFee + bringInGasFeeRaw(r, fasterFee > 0n);
     let problem: BringInRowProblem | null = null;
     if (r.amountRaw > r.maxRaw) problem = "over_balance";
     else if (r.amountRaw < MIN_BRING_IN) problem = "too_small";
