@@ -11,6 +11,8 @@ export type TFulfilmentStep = {
   key: "paid" | "processing" | "done";
   label: string;
   detail?: string;
+  /** Two-word caption under the step in the horizontal tracker. */
+  caption?: string;
   state: "done" | "active" | "todo" | "failed";
 };
 
@@ -25,7 +27,7 @@ export type TFulfilmentSummary = {
 
 const POINTS = new Intl.NumberFormat("en-US");
 
-function formatClock(iso: string): string {
+export function formatClock(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
@@ -48,7 +50,7 @@ export function deliveryTypeLabel(
         ? `Sent directly to ${target}`
         : "Sent directly to your account";
     case "BILL_PAYMENT":
-      return "Bill paid on your behalf — receipt in the app";
+      return "Bill paid on your behalf, receipt in the app";
     case "EMAIL":
       return target
         ? `Emailed by the provider to ${target}`
@@ -162,20 +164,30 @@ export function summariseFulfilment(input: {
     processingDetail?: string,
     doneLabel = deliveredLabel,
     doneDetail?: string,
+    processingCaption?: string,
+    doneCaption?: string,
   ): TFulfilmentStep[] => [
     {
       key: "paid",
       label: paidLabel,
       state: paymentFailed ? "failed" : paidDone ? "done" : "active",
       detail: paymentFailed ? "We couldn't verify the payment" : undefined,
+      caption: paymentFailed ? "Not verified" : undefined,
     },
     {
       key: "processing",
       label: "Preparing",
       state: processing,
       detail: processingDetail,
+      caption: processingCaption,
     },
-    { key: "done", label: doneLabel, state: done, detail: doneDetail },
+    {
+      key: "done",
+      label: doneLabel,
+      state: done,
+      detail: doneDetail,
+      caption: doneCaption,
+    },
   ];
 
   switch (status) {
@@ -183,7 +195,7 @@ export function summariseFulfilment(input: {
       if (paymentFailed) {
         return {
           title: "Payment couldn't be verified",
-          detail: "You don't need to do anything — we'll update you.",
+          detail: "You don't need to do anything. We'll update you.",
           tone: "bad",
           steps: steps("todo", "todo"),
         };
@@ -205,7 +217,14 @@ export function summariseFulfilment(input: {
         title: "Preparing your order",
         detail: "We'll notify you the moment it's ready.",
         tone: "pending",
-        steps: steps("active", "todo", eta),
+        steps: steps(
+          "active",
+          "todo",
+          eta,
+          undefined,
+          undefined,
+          expectedBy ? `Ready by ${formatClock(expectedBy)}` : "A few minutes",
+        ),
       };
     }
     case "DELAYED":
@@ -217,16 +236,26 @@ export function summariseFulfilment(input: {
         steps: steps(
           "active",
           "todo",
-          "Longer than expected — still processing",
+          "Longer than expected, still processing",
+          undefined,
+          undefined,
+          "Still processing",
         ),
       };
     case "NEEDS_RECONCILE":
       return {
         title: "We're checking this order",
         detail:
-          "It needs a manual check. Your money is safe — we'll update you within 24 hours.",
+          "It needs a manual check. Your money is safe. We'll update you within 24 hours.",
         tone: "warn",
-        steps: steps("active", "todo", "Being checked by our team"),
+        steps: steps(
+          "active",
+          "todo",
+          "Being checked by our team",
+          undefined,
+          undefined,
+          "Being checked",
+        ),
       };
     case "DELIVERED":
       return {
@@ -243,7 +272,7 @@ export function summariseFulfilment(input: {
     case "FAILED": {
       const refundLine =
         refund?.status === "PENDING_REVIEW"
-          ? "Your refund is being reviewed — usually within 24 hours."
+          ? "Your refund is being reviewed, usually within 24 hours."
           : refund?.status === "REJECTED"
             ? "Please contact support about this order."
             : "Your refund is being arranged.";
@@ -257,6 +286,12 @@ export function summariseFulfilment(input: {
           error ?? undefined,
           "Refund",
           refundLine,
+          "Not delivered",
+          refund?.status === "PENDING_REVIEW"
+            ? "Under review"
+            : refund?.status === "REJECTED"
+              ? "Contact support"
+              : "Being arranged",
         ),
       };
     }
@@ -272,7 +307,7 @@ export function summariseFulfilment(input: {
       const pts = refund ? formatPoints(refund.points) : "your points";
       return {
         title: "Refunded",
-        detail: `We couldn't deliver this order. ${pts} are back in your balance — you can retry with points.`,
+        detail: `We couldn't deliver this order. ${pts} are back in your balance. You can retry with points.`,
         tone: "bad",
         steps: steps(
           "failed",
@@ -280,6 +315,8 @@ export function summariseFulfilment(input: {
           error ?? undefined,
           "Refunded",
           `${pts} returned`,
+          "Not delivered",
+          "Returned",
         ),
       };
     }

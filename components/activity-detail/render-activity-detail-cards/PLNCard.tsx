@@ -1,122 +1,103 @@
-import { Copy, Zap } from "lucide-react-native";
+import { Zap } from "lucide-react-native";
 import React from "react";
-import { Text, TouchableOpacity, View } from "react-native";
-import { copyToClipboard } from "@/utils/helperUtils";
+import { Text, View } from "react-native";
 import { extractVoucher } from "@/utils/vcGamerUtils";
+import { BRAND_RED, CopyPill, SectionLabel } from "./PurchaseDetailParts";
 
 type TPLNCustomerInfo = {
-  meterNumber: number;
+  /** The meter number typed at checkout; empty when unknown. */
+  meterNumber: string;
   vcGamerVoucher: string;
 };
+
+function kwhLabel(kwhCapacity: string): string {
+  const value = kwhCapacity.includes("KWH")
+    ? kwhCapacity.split("KWH")[0]
+    : kwhCapacity;
+  return `${value} kWh`;
+}
+
+/**
+ * A PLN prepaid token: the 20 digits in the same dashed brand box the
+ * voucher code uses, then name, meter, tariff and energy in a small grid.
+ * Inner content only; the caller supplies the card.
+ */
 export default function PLNCard({
   plnCustomerInfo,
 }: {
   plnCustomerInfo: TPLNCustomerInfo;
 }) {
   const voucher = extractVoucher("PLN", plnCustomerInfo.vcGamerVoucher);
-  const handleCopyTokenCode = () => {
-    voucher?.tokenCode &&
-      copyToClipboard(voucher.tokenCode, "Token code copied!");
-  };
+
+  const facts = [
+    { label: "Name", value: voucher?.name ?? "", mono: false },
+    { label: "Meter no.", value: plnCustomerInfo.meterNumber, mono: true },
+    {
+      label: "Tariff / Power",
+      value: voucher?.tarifOrPower ?? "",
+      mono: false,
+    },
+    {
+      label: "Energy",
+      value: voucher?.kwhCapacity ? kwhLabel(voucher.kwhCapacity) : "",
+      mono: false,
+    },
+  ].filter((f) => f.value.trim());
+
+  const rows: (typeof facts)[] = [];
+  for (let i = 0; i < facts.length; i += 2) rows.push(facts.slice(i, i + 2));
 
   return (
-    <View className="p-4">
-      <View className="bg-gradient-to-r from-light-main-container to-white rounded-2xl mb-4">
-        <View className="flex-row items-center mb-3">
-          <View className="bg-yellow-500/10 p-3 rounded-2xl mr-4">
-            <Zap size={24} color="#f97316" strokeWidth={2} />
-          </View>
-          <View className="flex-1">
-            <Text className="text-light-matte-black font-bold text-xl tracking-tight">
-              PLN Token Details
-            </Text>
-            <View className="h-1 bg-light-primary-red/20 rounded-full mt-1 w-12" />
-          </View>
-        </View>
+    <View className="gap-3.5">
+      <SectionLabel
+        icon={<Zap size={16} color={BRAND_RED} strokeWidth={2.2} />}
+        label="Electricity token"
+      />
 
-        <Text className="text-light-matte-black/70 text-base leading-6 font-medium">
-          Electricity prepaid token from PLN
-        </Text>
-
-        <View className="flex-row justify-between items-center mt-4 pt-3 border-t border-gray-100">
-          <Text className="text-light-matte-black/40 text-xs font-semibold uppercase tracking-wider">
-            Token Information
+      {voucher?.tokenCode ? (
+        <View className="border-2 border-dashed border-light-primary-red/35 bg-light-primary-red/5 rounded-2xl p-4 items-center gap-3">
+          <Text className="text-xs text-light-matte-black/60">
+            20-digit token
           </Text>
-          <View className="flex-row space-x-1">
-            <View className="w-2 h-2 bg-light-primary-red/30 rounded-full" />
-            <View className="w-2 h-2 bg-light-primary-red/50 rounded-full" />
-            <View className="w-2 h-2 bg-light-primary-red rounded-full" />
-          </View>
+          <Text
+            className="text-lg font-bold font-mono text-light-matte-black text-center"
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            selectable
+          >
+            {voucher.tokenCode}
+          </Text>
+          <CopyPill
+            value={voucher.tokenCode}
+            label="Token code"
+            idleText="Copy token"
+          />
         </View>
-      </View>
+      ) : null}
 
-      <View className="bg-light-main-container/35 rounded-xl p-3 mb-4">
-        <Text className="text-light-matte-black font-medium text-sm mb-3">
-          Customer Information
-        </Text>
-
-        <View className="space-y-2">
-          <View className="flex-row justify-between items-center">
-            <Text className="text-light-matte-black/70 text-sm">Name:</Text>
-            <Text className="text-light-matte-black text-sm font-medium">
-              {voucher?.name}
-            </Text>
-          </View>
-          <View className="flex-row justify-between items-center">
-            <Text className="text-light-matte-black/70 text-sm">
-              Meter Number:
-            </Text>
-            <Text className="text-light-primary-red text-sm font-medium">
-              {plnCustomerInfo.meterNumber}
-            </Text>
-          </View>
-
-          <View className="flex-row justify-between items-center">
-            <Text className="text-light-matte-black/70 text-sm">
-              Tarif/Power:
-            </Text>
-            <Text className="text-light-matte-black text-sm font-medium">
-              {voucher?.tarifOrPower}
-            </Text>
-          </View>
-
-          {voucher?.kwhCapacity && (
-            <View className="flex-row justify-between items-center">
-              <Text className="text-light-matte-black/70 text-sm">kWh:</Text>
-              <Text className="text-light-matte-black text-sm font-medium">
-                {voucher?.kwhCapacity.includes("KWH")
-                  ? voucher?.kwhCapacity.split("KWH")[0]
-                  : voucher?.kwhCapacity}{" "}
-                kWh
+      {rows.map((row) => (
+        <View key={row[0].label} className="flex-row gap-2">
+          {row.map((f) => (
+            <View
+              key={f.label}
+              className="flex-1 bg-light-main-container rounded-xl px-3 py-2.5"
+            >
+              <Text className="text-xs text-light-matte-black/60">
+                {f.label}
+              </Text>
+              <Text
+                className={`text-sm font-semibold text-light-matte-black mt-0.5 ${
+                  f.mono ? "font-mono" : ""
+                }`}
+                selectable
+              >
+                {f.value}
               </Text>
             </View>
-          )}
+          ))}
+          {row.length === 1 ? <View className="flex-1" /> : null}
         </View>
-      </View>
-
-      <View className="bg-light-main-container/35 rounded-xl p-3">
-        <View className="flex-row items-center justify-between mb-3">
-          <Text className="text-light-matte-black font-medium text-sm">
-            Token Code
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          className="bg-white rounded-lg p-3 shadow-sm"
-          activeOpacity={0.5}
-          onPress={handleCopyTokenCode}
-        >
-          <Text className="text-light-primary-red font-bold text-lg tracking-wider text-center mb-1">
-            {voucher?.tokenCode}
-          </Text>
-          <View className="items-center flex-row justify-center gap-2">
-            <Text className="text-light-matte-black/50 text-xs text-center">
-              Tap copy here to copy token code
-            </Text>
-            <Copy size={10} color="#c71c4b" />
-          </View>
-        </TouchableOpacity>
-      </View>
+      ))}
     </View>
   );
 }

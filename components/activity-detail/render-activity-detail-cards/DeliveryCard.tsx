@@ -1,28 +1,29 @@
-import {
-  ChevronDown,
-  ChevronUp,
-  Copy,
-  Gift,
-  Mail,
-  Receipt,
-  Send,
-} from "lucide-react-native";
+import { ChevronDown, Gift, Mail, Receipt, Send } from "lucide-react-native";
 import React, { useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import type {
+  TDeliveryField,
   TDeliveryPayload,
   TDeliveryType,
   TFulfilment,
 } from "@/api/types/fulfilment";
 import type { TCustomerInfo } from "@/api/types/redeem";
 import { customerInfoTarget } from "@/utils/fulfilmentUtils";
-import { copyToClipboard } from "@/utils/helperUtils";
 import { isPLNVoucher } from "@/utils/vcGamerUtils";
 import PLNCard from "./PLNCard";
+import {
+  BRAND_RED,
+  CopyBox,
+  CopyIconButton,
+  CopyPill,
+  DetailCard,
+  DetailRow,
+  MUTED,
+  SectionLabel,
+} from "./PurchaseDetailParts";
 
-function plnMeter(customerInfo: TCustomerInfo | undefined): number {
-  const target = customerInfoTarget(customerInfo);
-  return Number(target ?? 0) || 0;
+function plnMeter(customerInfo: TCustomerInfo | undefined): string {
+  return (customerInfoTarget(customerInfo) ?? "").trim();
 }
 
 /**
@@ -66,46 +67,103 @@ function RawBlock({
 }) {
   const [open, setOpen] = useState(initiallyOpen);
   return (
-    <View className="mt-3">
+    <View>
       <TouchableOpacity
         onPress={() => setOpen((v) => !v)}
-        className="flex-row items-center justify-between"
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        className="flex-row items-center self-start py-1"
       >
-        <Text className="text-light-matte-black/60 text-xs font-semibold uppercase tracking-wider">
+        <Text className="text-xs font-semibold uppercase tracking-wide text-light-matte-black/60 mr-1.5">
           Exactly as the provider sent it
         </Text>
-        {open ? (
-          <ChevronUp size={14} color="#6b7280" />
-        ) : (
-          <ChevronDown size={14} color="#6b7280" />
-        )}
-      </TouchableOpacity>
-      {open ? (
-        <View className="flex-row items-start bg-light-main-container/50 rounded-lg p-3 mt-2">
-          <Text
-            className="text-light-matte-black text-xs font-mono flex-1"
-            selectable
-          >
-            {raw}
-          </Text>
-          <TouchableOpacity
-            onPress={() => copyToClipboard(raw, "Copied")}
-            className="ml-2 p-1"
-          >
-            <Copy size={14} color="#c71c4b" />
-          </TouchableOpacity>
+        <View style={open ? { transform: [{ rotate: "180deg" }] } : undefined}>
+          <ChevronDown size={14} color={MUTED} />
         </View>
-      ) : null}
+      </TouchableOpacity>
+      {open ? <RawText raw={raw} /> : null}
+    </View>
+  );
+}
+
+function RawText({ raw }: { raw: string }) {
+  return (
+    <View className="flex-row items-start bg-light-main-container rounded-xl pl-3 py-1 pr-1 mt-2">
+      <Text
+        className="text-sm font-mono text-light-matte-black flex-1 py-2"
+        selectable
+      >
+        {raw}
+      </Text>
+      <CopyIconButton value={raw} label="Provider text" />
+    </View>
+  );
+}
+
+function FieldRows({
+  fields,
+  first,
+}: {
+  fields: TDeliveryField[];
+  first?: boolean;
+}) {
+  if (fields.length === 0) return null;
+  return (
+    <View>
+      {fields.map((f, i) => (
+        <DetailRow
+          key={`${f.label}-${i}`}
+          label={f.label || "Detail"}
+          value={f.value}
+          copyValue={f.copyable ? f.value : undefined}
+          copyLabel={f.label || "Value"}
+          first={first && i === 0}
+        />
+      ))}
+    </View>
+  );
+}
+
+/** The voucher code: dashed brand box, big mono code, red copy pill. */
+function CodeBox({ field }: { field: TDeliveryField }) {
+  return (
+    <View className="border-2 border-dashed border-light-primary-red/35 bg-light-primary-red/5 rounded-2xl px-4 py-[18px] items-center gap-3.5">
+      <Text className="text-xs text-light-matte-black/60">{field.label}</Text>
+      <Text
+        className="text-[22px] font-bold font-mono tracking-widest text-light-primary-red text-center"
+        selectable
+      >
+        {field.value}
+      </Text>
+      <CopyPill
+        value={field.value}
+        label={field.label}
+        idleText={`Copy ${field.label.toLowerCase()}`}
+      />
+    </View>
+  );
+}
+
+function EmailTip({ n, text }: { n: number; text: string }) {
+  return (
+    <View className="flex-row items-start">
+      <View className="w-5 h-5 rounded-full bg-light-matte-black items-center justify-center">
+        <Text className="text-white text-[11px] font-bold">{n}</Text>
+      </View>
+      <Text className="flex-1 ml-2.5 text-[13px] leading-[19px] text-light-matte-black/80">
+        {text}
+      </Text>
     </View>
   );
 }
 
 /**
  * The one card for whatever the provider handed over. Renders the
- * server-parsed `DeliveryPayload` without knowing the product: a big
- * copyable `primary`, labelled rows, and the raw provider text — always
- * available, expanded automatically when the parse wasn't exact so an
- * unknown format is "less pretty", never "missing".
+ * server-parsed `DeliveryPayload` without knowing the product: the
+ * `primary` (code, SN, reference), labelled rows, and the raw provider
+ * text. The raw text is always available, expanded automatically when the
+ * parse wasn't exact, so an unknown format is "less pretty", never
+ * "missing".
  */
 export default function DeliveryCard({
   fulfilment,
@@ -134,7 +192,7 @@ export default function DeliveryCard({
   // rows parsed before the server learned that still say "topup".
   if (delivery.raw && isPLNVoucher(delivery.raw)) {
     return (
-      <View className="bg-white rounded-2xl shadow-sm">
+      <DetailCard className="px-5 py-[18px] gap-3.5">
         <PLNCard
           plnCustomerInfo={{
             vcGamerVoucher: delivery.raw,
@@ -142,147 +200,113 @@ export default function DeliveryCard({
           }}
         />
         {delivery.parse !== "exact" ? (
-          <View className="px-4 pb-4">
-            <RawBlock raw={delivery.raw} initiallyOpen />
-          </View>
+          <RawBlock raw={delivery.raw} initiallyOpen />
         ) : null}
-      </View>
+      </DetailCard>
     );
   }
-
-  const heading =
-    delivery.kind === "topup"
-      ? {
-          icon: <Send size={18} color="#c71c4b" />,
-          title: "Delivered",
-          sub: delivery.target
-            ? `Sent to ${delivery.target}`
-            : "Sent to your account",
-        }
-      : delivery.kind === "bill"
-        ? {
-            icon: <Receipt size={18} color="#c71c4b" />,
-            title: "Receipt",
-            sub: delivery.target ? `For ${delivery.target}` : undefined,
-          }
-        : delivery.kind === "email"
-          ? {
-              icon: <Mail size={18} color="#c71c4b" />,
-              title: "On its way by email",
-              sub: delivery.target
-                ? `The provider is emailing it to ${delivery.target}. Check spam if it isn't there in a few minutes.`
-                : "The provider is emailing it to you. Check spam if it isn't there in a few minutes.",
-            }
-          : {
-              icon: <Gift size={18} color="#c71c4b" />,
-              title: "Your voucher",
-              sub: "Tap to copy, then redeem it with the provider.",
-            };
 
   const showRaw =
     !!delivery.raw && (delivery.parse !== "exact" || !delivery.primary);
   const rawIsAllWeShow =
     !!delivery.raw && !delivery.primary && delivery.fields.length === 0;
 
-  return (
-    <View className="bg-white rounded-2xl p-4 shadow-sm">
-      <View className="flex-row items-center mb-3">
-        {heading.icon}
-        <View className="ml-2 flex-1">
-          <Text className="text-light-matte-black font-bold text-lg">
-            {heading.title}
-          </Text>
-          {heading.sub ? (
-            <Text className="text-light-matte-black/60 text-xs mt-0.5">
-              {heading.sub}
+  const raw =
+    showRaw && delivery.raw ? (
+      rawIsAllWeShow ? (
+        <RawText raw={delivery.raw} />
+      ) : (
+        <RawBlock
+          raw={delivery.raw}
+          initiallyOpen={delivery.parse !== "exact"}
+        />
+      )
+    ) : null;
+
+  const icon = (Icon: typeof Gift) => (
+    <Icon size={16} color={BRAND_RED} strokeWidth={2.2} />
+  );
+
+  if (delivery.kind === "email") {
+    return (
+      <DetailCard className="p-5 gap-3">
+        <View className="items-center gap-3">
+          <View className="w-14 h-14 rounded-[18px] bg-light-primary-red/10 items-center justify-center">
+            <Mail size={26} color={BRAND_RED} strokeWidth={2} />
+          </View>
+          {delivery.target ? (
+            <View className="items-center">
+              <Text className="text-[13px] text-light-matte-black/60">
+                Sent to
+              </Text>
+              <Text
+                className="text-base font-bold text-light-matte-black mt-1 text-center"
+                selectable
+              >
+                {delivery.target}
+              </Text>
+            </View>
+          ) : (
+            <Text className="text-[13px] text-light-matte-black/60 text-center">
+              Sent to the email you entered at checkout
+            </Text>
+          )}
+        </View>
+        <View className="bg-light-main-container rounded-xl px-3.5 py-3 gap-2">
+          <EmailTip n={1} text="Check your inbox in a few minutes." />
+          <EmailTip n={2} text="Not there? Look in Spam or Promotions." />
+        </View>
+        {delivery.primary ? (
+          <CopyBox
+            label={delivery.primary.label}
+            value={delivery.primary.value}
+          />
+        ) : null}
+        <FieldRows fields={delivery.fields} />
+        {raw}
+      </DetailCard>
+    );
+  }
+
+  if (delivery.kind === "topup" || delivery.kind === "bill") {
+    const isBill = delivery.kind === "bill";
+    return (
+      <DetailCard className="px-5 py-[18px] gap-3">
+        <View>
+          <SectionLabel
+            icon={icon(isBill ? Receipt : Send)}
+            label={isBill ? "Receipt" : "Top-up proof"}
+          />
+          {delivery.target ? (
+            <Text className="text-[13px] text-light-matte-black/60 mt-1.5">
+              {isBill ? "For" : "Sent to"} {delivery.target}
             </Text>
           ) : null}
         </View>
-      </View>
-
-      {delivery.primary ? (
-        <View className="border-2 border-dashed border-light-primary-red/40 rounded-xl p-3">
-          <Text className="text-light-matte-black/60 text-xs mb-1">
-            {delivery.primary.label}
-          </Text>
-          <View className="flex-row items-center justify-between">
-            <Text
-              className="text-light-primary-red font-bold text-lg font-mono flex-1 tracking-widest"
-              selectable
-            >
-              {delivery.primary.value}
-            </Text>
-            <TouchableOpacity
-              onPress={() =>
-                copyToClipboard(
-                  delivery.primary?.value ?? "",
-                  `${delivery.primary?.label} copied`,
-                )
-              }
-              className="ml-2 p-2"
-            >
-              <Copy size={18} color="#c71c4b" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
-
-      {delivery.fields.length > 0 ? (
-        <View className={delivery.primary ? "mt-3" : ""}>
-          {delivery.fields.map((f, i) => (
-            <View
-              key={`${f.label}-${i}`}
-              className="flex-row justify-between items-center py-1.5 border-b border-light-matte-black/5"
-            >
-              <Text className="text-light-matte-black/60 text-sm flex-1">
-                {f.label || "Detail"}
-              </Text>
-              <View className="flex-row items-center flex-1 justify-end">
-                <Text
-                  className="text-light-matte-black text-sm font-medium text-right"
-                  selectable
-                >
-                  {f.value}
-                </Text>
-                {f.copyable ? (
-                  <TouchableOpacity
-                    onPress={() =>
-                      copyToClipboard(f.value, `${f.label || "Value"} copied`)
-                    }
-                    className="ml-2 p-1"
-                  >
-                    <Copy size={12} color="#c71c4b" />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      {showRaw && delivery.raw ? (
-        rawIsAllWeShow ? (
-          <View className="flex-row items-start bg-light-main-container/50 rounded-lg p-3">
-            <Text
-              className="text-light-matte-black text-sm font-mono flex-1"
-              selectable
-            >
-              {delivery.raw}
-            </Text>
-            <TouchableOpacity
-              onPress={() => copyToClipboard(delivery.raw ?? "", "Copied")}
-              className="ml-2 p-1"
-            >
-              <Copy size={16} color="#c71c4b" />
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <RawBlock
-            raw={delivery.raw}
-            initiallyOpen={delivery.parse !== "exact"}
+        {delivery.primary ? (
+          <CopyBox
+            label={delivery.primary.label}
+            value={delivery.primary.value}
           />
-        )
-      ) : null}
-    </View>
+        ) : null}
+        <FieldRows fields={delivery.fields} first={!delivery.primary} />
+        {delivery.primary && !isBill ? (
+          <Text className="text-[13px] leading-[18px] text-light-matte-black/70">
+            Not showing up yet? Keep this number. It's how the top-up gets
+            traced.
+          </Text>
+        ) : null}
+        {raw}
+      </DetailCard>
+    );
+  }
+
+  return (
+    <DetailCard className="px-5 py-[18px] gap-3.5">
+      <SectionLabel icon={icon(Gift)} label="Your voucher" />
+      {delivery.primary ? <CodeBox field={delivery.primary} /> : null}
+      <FieldRows fields={delivery.fields} first={!delivery.primary} />
+      {raw}
+    </DetailCard>
   );
 }
